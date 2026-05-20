@@ -1,0 +1,22 @@
+' minimal ReAct-style agent loop in Sratch
+' env: ANTHROPIC_API_KEY for real LLM calls; stub used otherwise
+
+sys="You are a tool-using agent. Reply with one of: SH:<cmd> | DONE:<text>"
+goal=#in()
+h=sys+"\nGOAL:"+goal
+
+*?T{
+  r=@h
+  >"<<"+r
+  ?#has(r,"DONE:"){
+    >"="+r
+    brk
+  }
+  ?#has(r,"SH:"){
+    cmd=#split(r,"SH:")[1]
+    o=#sh(cmd)
+    h=h+"\nOBS:"+o
+  }:{
+    h=h+"\nNOTE:invalid format"
+  }
+}

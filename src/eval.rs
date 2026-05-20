@@ -1,0 +1,310 @@
+use crate::ast::*;
+use crate::builtins::call_tool;
+use crate::llm::llm_call;
+use crate::value::{Env, Fun, Val};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+pub enum Flow { Norm, Ret(Val), Brk, Cnt }
+
+pub struct Interp { pub env: Env }
+
+impl Interp {
+    pub fn new() -> Self {
+        let mut env = Env::new();
+        env.set("T", Val::Bool(true));
+        env.set("F", Val::Bool(false));
+        env.set("N", Val::Nil);
+        Self { env }
+    }
+
+    pub fn run(&mut self, prog: &[Stmt]) -> Result<Val, String> {
+        let mut last = Val::Nil;
+        for s in prog {
+            match self.exec(s)? {
+                Flow::Norm => {}
+                Flow::Ret(v) => return Ok(v),
+                _ => return Err("brk/cnt outside loop".into()),
+            }
+            last = Val::Nil;
+        }
+        Ok(last)
+    }
+
+    fn exec_block(&mut self, body: &[Stmt]) -> Result<Flow, String> {
+        for s in body {
+            match self.exec(s)? {
+                Flow::Norm => {}
+                other => return Ok(other),
+            }
+        }
+        Ok(Flow::Norm)
+    }
+
+    fn exec(&mut self, s: &Stmt) -> Result<Flow, String> {
+        match s {
+            Stmt::Expr(e) => { self.eval(e)?; Ok(Flow::Norm) }
+            Stmt::Assign(n, e) => { let v = self.eval(e)?; self.env.set(n, v); Ok(Flow::Norm) }
+            Stmt::AssignIdx(arr, idx, val) => {
+                let a = self.eval(arr)?;
+                let i = self.eval(idx)?;
+                let v = self.eval(val)?;
+                match a {
+                    Val::List(l) => {
+                        let ii = i.to_num()? as usize;
+                        let mut lb = l.borrow_mut();
+                        if ii >= lb.len() { return Err("index out of bounds".into()); }
+                        lb[ii] = v;
+                    }
+                    Val::Dict(d) => {
+                        let mut db = d.borrow_mut();
+                        if let Some(slot) = db.iter_mut().find(|(k, _)| k.eq_val(&i)) {
+                            slot.1 = v;
+                        } else {
+                            db.push((i, v));
+                        }
+                    }
+                    _ => return Err("index-assign: bad type".into()),
+                }
+                Ok(Flow::Norm)
+            }
+            Stmt::Print(e) => { let v = self.eval(e)?; println!("{}", v); Ok(Flow::Norm) }
+            Stmt::Return(e) => { let v = self.eval(e)?; Ok(Flow::Ret(v)) }
+            Stmt::If(c, t, e) => {
+                if self.eval(c)?.truthy() { self.exec_block(t) }
+                else if let Some(b) = e { self.exec_block(b) }
+                else { Ok(Flow::Norm) }
+            }
+            Stmt::Repeat(n, body) => {
+                let n = self.eval(n)?.to_num()? as i64;
+                self.env.push();
+                let mut i = 0i64;
+                while i < n {
+                    self.env.set_local("i", Val::Num(i as f64));
+                    match self.exec_block(body)? {
+                        Flow::Norm | Flow::Cnt => {}
+                        Flow::Brk => break,
+                        Flow::Ret(v) => { self.env.pop(); return Ok(Flow::Ret(v)); }
+                    }
+                    i += 1;
+                }
+                self.env.pop();
+                Ok(Flow::Norm)
+            }
+            Stmt::For(name, iter, body) => {
+                let it = self.eval(iter)?;
+                let items: Vec<Val> = match it {
+                    Val::List(l) => l.borrow().clone(),
+                    Val::Str(s) => s.chars().map(|c| Val::Str(Rc::new(c.to_string()))).collect(),
+                    Val::Dict(d) => d.borrow().iter().map(|(k, _)| k.clone()).collect(),
+                    Val::Num(n) => {
+                        let mut v = Vec::new();
+                        let mut i = 0i64;
+                        let stop = n as i64;
+                        while i < stop { v.push(Val::Num(i as f64)); i += 1; }
+                        v
+                    }
+                    _ => return Err("for: not iterable".into()),
+                };
+                self.env.push();
+                for it in items {
+                    self.env.set_local(name, it);
+                    match self.exec_block(body)? {
+                        Flow::Norm | Flow::Cnt => {}
+                        Flow::Brk => break,
+                        Flow::Ret(v) => { self.env.pop(); return Ok(Flow::Ret(v)); }
+                    }
+                }
+                self.env.pop();
+                Ok(Flow::Norm)
+            }
+            Stmt::While(c, body) => {
+                loop {
+                    if !self.eval(c)?.truthy() { break; }
+                    match self.exec_block(body)? {
+                        Flow::Norm | Flow::Cnt => {}
+                        Flow::Brk => break,
+                        Flow::Ret(v) => return Ok(Flow::Ret(v)),
+                    }
+                }
+                Ok(Flow::Norm)
+            }
+            Stmt::Def(name, params, body) => {
+                let f = Val::Fn(Rc::new(Fun {
+                    name: name.clone(),
+                    params: params.clone(),
+                    body: body.clone(),
+                }));
+                self.env.set(name, f);
+                Ok(Flow::Norm)
+            }
+            Stmt::Break => Ok(Flow::Brk),
+            Stmt::Continue => Ok(Flow::Cnt),
+        }
+    }
+
+    fn eval(&mut self, e: &Expr) -> Result<Val, String> {
+        Ok(match e {
+            Expr::Num(n) => Val::Num(*n),
+            Expr::Str(s) => Val::Str(Rc::new(s.clone())),
+            Expr::Bool(b) => Val::Bool(*b),
+            Expr::Nil => Val::Nil,
+            Expr::Ident(n) => self.env.get(n).ok_or_else(|| format!("undefined: {}", n))?,
+            Expr::List(items) => {
+                let mut v = Vec::with_capacity(items.len());
+                for it in items { v.push(self.eval(it)?); }
+                Val::List(Rc::new(RefCell::new(v)))
+            }
+            Expr::Dict(kvs) => {
+                let mut d = Vec::with_capacity(kvs.len());
+                for (k, v) in kvs {
+                    let kv = self.eval(k)?;
+                    let vv = self.eval(v)?;
+                    d.push((kv, vv));
+                }
+                Val::Dict(Rc::new(RefCell::new(d)))
+            }
+            Expr::Bin(op, a, b) => {
+                if *op == BinOp::And {
+                    let av = self.eval(a)?;
+                    return Ok(if !av.truthy() { av } else { self.eval(b)? });
+                }
+                if *op == BinOp::Or {
+                    let av = self.eval(a)?;
+                    return Ok(if av.truthy() { av } else { self.eval(b)? });
+                }
+                let av = self.eval(a)?;
+                let bv = self.eval(b)?;
+                bin(*op, av, bv)?
+            }
+            Expr::Un(op, x) => {
+                let v = self.eval(x)?;
+                match op {
+                    UnOp::Neg => Val::Num(-v.to_num()?),
+                    UnOp::Not => Val::Bool(!v.truthy()),
+                }
+            }
+            Expr::Index(a, i) => {
+                let av = self.eval(a)?;
+                let iv = self.eval(i)?;
+                index(av, iv)?
+            }
+            Expr::Field(a, k) => {
+                let av = self.eval(a)?;
+                index(av, Val::Str(Rc::new(k.clone())))?
+            }
+            Expr::Call(callee, args) => {
+                let mut argv = Vec::with_capacity(args.len());
+                for a in args { argv.push(self.eval(a)?); }
+                let cv = self.eval(callee)?;
+                match cv {
+                    Val::Fn(f) => self.call_fn(&f, argv)?,
+                    _ => return Err("not callable".into()),
+                }
+            }
+            Expr::Tool(name, args) => {
+                let mut argv = Vec::with_capacity(args.len());
+                for a in args { argv.push(self.eval(a)?); }
+                call_tool(name, &argv)?
+            }
+            Expr::Llm(p, m) => {
+                let pv = self.eval(p)?;
+                let mv = match m { Some(x) => Some(self.eval(x)?), None => None };
+                llm_call(&pv, mv.as_ref())?
+            }
+        })
+    }
+
+    fn call_fn(&mut self, f: &Fun, args: Vec<Val>) -> Result<Val, String> {
+        self.env.push();
+        for (i, p) in f.params.iter().enumerate() {
+            self.env.set_local(p, args.get(i).cloned().unwrap_or(Val::Nil));
+        }
+        let r = self.exec_block(&f.body);
+        self.env.pop();
+        match r? {
+            Flow::Ret(v) => Ok(v),
+            Flow::Norm => Ok(Val::Nil),
+            _ => Err("brk/cnt outside loop".into()),
+        }
+    }
+}
+
+fn bin(op: BinOp, a: Val, b: Val) -> Result<Val, String> {
+    use BinOp::*;
+    Ok(match op {
+        Add => match (&a, &b) {
+            (Val::Str(_), _) | (_, Val::Str(_)) => {
+                Val::Str(Rc::new(format!("{}{}", a, b)))
+            }
+            (Val::List(x), Val::List(y)) => {
+                let mut v = x.borrow().clone();
+                v.extend(y.borrow().iter().cloned());
+                Val::List(Rc::new(RefCell::new(v)))
+            }
+            _ => Val::Num(a.to_num()? + b.to_num()?),
+        },
+        Sub => Val::Num(a.to_num()? - b.to_num()?),
+        Mul => match (&a, &b) {
+            (Val::Str(s), _) => {
+                let n = b.to_num()? as i64;
+                Val::Str(Rc::new(s.repeat(n.max(0) as usize)))
+            }
+            _ => Val::Num(a.to_num()? * b.to_num()?),
+        },
+        Div => {
+            let d = b.to_num()?;
+            if d == 0.0 { return Err("div by zero".into()); }
+            Val::Num(a.to_num()? / d)
+        }
+        Mod => {
+            let d = b.to_num()?;
+            if d == 0.0 { return Err("mod by zero".into()); }
+            Val::Num(a.to_num()? % d)
+        }
+        Eq => Val::Bool(a.eq_val(&b)),
+        Ne => Val::Bool(!a.eq_val(&b)),
+        Lt => Val::Bool(cmp_num(&a, &b)? < 0),
+        Gt => Val::Bool(cmp_num(&a, &b)? > 0),
+        Le => Val::Bool(cmp_num(&a, &b)? <= 0),
+        Ge => Val::Bool(cmp_num(&a, &b)? >= 0),
+        And | Or => unreachable!(),
+    })
+}
+
+fn cmp_num(a: &Val, b: &Val) -> Result<i32, String> {
+    if let (Val::Str(x), Val::Str(y)) = (a, b) {
+        return Ok(match x.cmp(y) { std::cmp::Ordering::Less => -1, std::cmp::Ordering::Equal => 0, std::cmp::Ordering::Greater => 1 });
+    }
+    let x = a.to_num()?;
+    let y = b.to_num()?;
+    Ok(if x < y { -1 } else if x > y { 1 } else { 0 })
+}
+
+fn index(a: Val, i: Val) -> Result<Val, String> {
+    match a {
+        Val::List(l) => {
+            let ii = i.to_num()? as i64;
+            let lb = l.borrow();
+            let n = lb.len() as i64;
+            let k = if ii < 0 { n + ii } else { ii };
+            if k < 0 || k >= n { return Ok(Val::Nil); }
+            Ok(lb[k as usize].clone())
+        }
+        Val::Str(s) => {
+            let ii = i.to_num()? as i64;
+            let chars: Vec<char> = s.chars().collect();
+            let n = chars.len() as i64;
+            let k = if ii < 0 { n + ii } else { ii };
+            if k < 0 || k >= n { return Ok(Val::Nil); }
+            Ok(Val::Str(Rc::new(chars[k as usize].to_string())))
+        }
+        Val::Dict(d) => {
+            for (k, v) in d.borrow().iter() {
+                if k.eq_val(&i) { return Ok(v.clone()); }
+            }
+            Ok(Val::Nil)
+        }
+        _ => Err("not indexable".into()),
+    }
+}
