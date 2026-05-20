@@ -2,15 +2,30 @@ use crate::builtins::json_encode;
 use crate::value::Val;
 use std::process::Command;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static MOCK_IDX: AtomicUsize = AtomicUsize::new(0);
 
 /// @prompt  or  @prompt %model
-/// Uses Anthropic API via curl if ANTHROPIC_API_KEY is set, otherwise
-/// echoes a deterministic stub so programs remain runnable offline.
+///
+/// Resolution order:
+///   1. SRATCH_MOCK     — newline-`---`-newline separated scripted replies
+///                        cycled in order (great for testing agent loops)
+///   2. ANTHROPIC_API_KEY — real Anthropic call via curl
+///   3. fallthrough     — deterministic stub so programs remain runnable
 pub fn llm_call(prompt: &Val, model: Option<&Val>) -> Result<Val, String> {
     let p = prompt.to_str();
     let m = model.map(|v| v.to_str()).unwrap_or_else(|| {
         std::env::var("SRATCH_MODEL").unwrap_or_else(|_| "claude-haiku-4-5".into())
     });
+
+    if let Ok(mock) = std::env::var("SRATCH_MOCK") {
+        let parts: Vec<&str> = mock.split("\n---\n").collect();
+        if !parts.is_empty() {
+            let i = MOCK_IDX.fetch_add(1, Ordering::SeqCst) % parts.len();
+            return Ok(Val::Str(Rc::new(parts[i].to_string())));
+        }
+    }
 
     let Ok(key) = std::env::var("ANTHROPIC_API_KEY") else {
         return Ok(Val::Str(Rc::new(format!("[stub:{}] {}", m, p))));

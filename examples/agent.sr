@@ -15,6 +15,7 @@ h=sys+"\nGOAL:"+goal
   ?#has(r,"SH:"){
     cmd=#split(r,"SH:")[1]
     o=#sh(cmd)
+    >">>OBS:"+o
     h=h+"\nOBS:"+o
   }:{
     h=h+"\nNOTE:invalid format"

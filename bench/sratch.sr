@@ -1,0 +1,2 @@
+h="ReAct. Reply SH:<cmd> or DONE:<text>\nGOAL:"+#in()
+*?T{r=@h ?#has(r,"DONE:"){>r brk} ?#has(r,"SH:"){h=h+"\nO:"+#sh(#split(r,"SH:")[1])}:{h=h+"\nE"}}
