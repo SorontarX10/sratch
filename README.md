@@ -40,22 +40,29 @@ echo '>"hi"' | ./target/release/sratch -
 | `:f(a,b){^a+b}`        | define function                        |
 | `@"prompt"`            | call LLM, returns string               |
 | `@p %"opus-4-7"`       | call LLM with explicit model           |
+| `~e`                   | run ReAct loop, return final `DONE:`   |
 | `#sh("ls -la")`        | run shell, returns stdout              |
 | `#get("https://...")`  | HTTP GET                               |
+| `"\R \D \S \G \O \E"`  | agent-vocab string escapes (lex-time)  |
 | `T F N`                | true / false / nil literals (env vars) |
 
 See [`SPEC.sr.md`](SPEC.sr.md) for the full surface.
 
-## Agent in 6 lines
+## Agent in 17 characters
 
 ```
-h="ReAct agent. Reply SH:<cmd> or DONE:<text>\nGOAL:"+#in()
-*?T{
-  r=@h
-  ?#has(r,"DONE:"){>r brk}
-  ?#has(r,"SH:"){h=h+"\nO:"+#sh(#split(r,"SH:")[1])}:{h=h+"\nE"}
-}
+>~("\R\G"+#in())
 ```
+
+The `~` operator is the ReAct loop baked into the runtime: read goal
+from `#in()`, call LLM, dispatch `SH:` to shell, accumulate
+observations, terminate on `DONE:`. The escape codes `\R \G` expand
+at lex time to the full system prompt + `GOAL:` label, so a single
+character of source can encode dozens of characters of prompt text.
+
+Set `SRATCH_TRACE=1` to see each iteration; set `SRATCH_AGENT_MAX`
+to cap iterations (default 20). For custom tool dispatch or
+non-shell agents, write the explicit form (`examples/agent.sr`).
 
 ## Status
 

@@ -86,9 +86,31 @@ mod tests {
 
     #[test]
     fn llm_stub() {
-        // Without ANTHROPIC_API_KEY, @ returns a stub string.
+        // Without ANTHROPIC_API_KEY and SRATCH_MOCK, @ returns a stub string.
         std::env::remove_var("ANTHROPIC_API_KEY");
+        std::env::remove_var("SRATCH_MOCK");
         let out = ev("^@\"hi\"").to_str();
         assert!(out.contains("hi"));
+    }
+
+    #[test]
+    fn string_escapes_agent_dict() {
+        // \R \D \S \G \O \E expand to common agent vocabulary
+        let out = ev("^\"\\R\"").to_str();
+        assert!(out.contains("ReAct") && out.contains("DONE:") && out.contains("SH:"));
+        assert_eq!(ev("^\"\\D\"").to_str(), "DONE:");
+        assert_eq!(ev("^\"\\S\"").to_str(), "SH:");
+        assert_eq!(ev("^\"\\G\"").to_str(), "GOAL:");
+    }
+
+    #[test]
+    fn agent_loop_primitive() {
+        // ~prompt runs a ReAct loop. Drive it with SRATCH_MOCK so the
+        // first reply runs a shell, the second emits DONE.
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        std::env::set_var("SRATCH_MOCK", "SH:echo seven\n---\nDONE:got it");
+        let out = ev("^~\"go\"").to_str();
+        std::env::remove_var("SRATCH_MOCK");
+        assert!(out.starts_with("DONE:"), "expected DONE: prefix, got: {}", out);
     }
 }

@@ -238,6 +238,11 @@ impl Parser {
                 } else { None };
                 Ok(Expr::Llm(Box::new(p), m))
             }
+            Tok::Tilde => {
+                self.bump();
+                let e = self.parse_unary()?;
+                Ok(Expr::Agent(Box::new(e)))
+            }
             Tok::Hash => {
                 self.bump();
                 let name = if let Tok::Ident(n) = self.bump() { n } else { return Err("#name expected".into()); };

@@ -212,6 +212,35 @@ impl Interp {
                 let mv = match m { Some(x) => Some(self.eval(x)?), None => None };
                 llm_call(&pv, mv.as_ref())?
             }
+            Expr::Agent(initial) => {
+                let mut h = self.eval(initial)?.to_str();
+                let max: usize = std::env::var("SRATCH_AGENT_MAX")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(20);
+                let trace = std::env::var("SRATCH_TRACE").is_ok();
+                let mut out = Val::Str(Rc::new(String::new()));
+                for _ in 0..max {
+                    let r = llm_call(&Val::Str(Rc::new(h.clone())), None)?;
+                    let rs = r.to_str();
+                    if trace { eprintln!("<<{}", rs); }
+                    if rs.contains("DONE:") {
+                        out = Val::Str(Rc::new(rs));
+                        break;
+                    }
+                    if let Some(i) = rs.find("SH:") {
+                        let cmd = rs[i + 3..].trim();
+                        let obs = call_tool("sh", &[Val::Str(Rc::new(cmd.to_string()))])?;
+                        let os = obs.to_str();
+                        if trace { eprintln!(">>O:{}", os); }
+                        h.push_str("\nO:");
+                        h.push_str(&os);
+                    } else {
+                        if trace { eprintln!(">>E"); }
+                        h.push_str("\nE");
+                    }
+                    out = Val::Str(Rc::new(rs));
+                }
+                out
+            }
         })
     }
 

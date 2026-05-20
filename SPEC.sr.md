@@ -30,7 +30,21 @@ call:      f(a,b)
 @e         LLM(prompt=e)              -> string
 @e %m      LLM with model m           -> string
 #t(a,b)    call tool t                -> value
+~e         ReAct(initial=e)           -> final DONE: text
 ```
+
+## string escapes (agent-vocab dictionary)
+```
+\n \t \r \\ \" \0    standard
+\R   "ReAct. Reply SH:<cmd> or DONE:<text>\n"
+\D   "DONE:"
+\S   "SH:"
+\G   "GOAL:"
+\O   "\nO:"
+\E   "\nE"
+```
+Expanded at lex time; one source char of escape = up to 38 chars of
+runtime string. `"\R\G"` builds the entire ReAct system+goal header.
 
 ## tools (#name)
 ```
@@ -54,11 +68,23 @@ A line beginning (after whitespace) with `'` is a comment until newline.
 Comments cost tokens — omit in shipping agent code.
 
 ## minimum agent loop
+
+Built-in primitive form (17 chars):
 ```
-h="sys\nGOAL:"+#in()
+>~("\R\G"+#in())
+```
+
+Explicit form for custom tools / control flow:
+```
+h="\R\G"+#in()
 *?T{
   r=@h
-  ?#has(r,"DONE:"){>r brk}
-  ?#has(r,"SH:"){h=h+"\nO:"+#sh(#split(r,"SH:")[1])}:{h=h+"\nE"}
+  ?#has(r,"\D"){>r brk}
+  ?#has(r,"\S"){h=h+"\O"+#sh(#split(r,"\S")[1])}:{h=h+"\E"}
 }
 ```
+
+## env
+- `SRATCH_AGENT_MAX` — max iterations for `~` (default 20).
+- `SRATCH_TRACE`     — when set, `~` prints `<<reply` / `>>O:obs` to
+  stderr each iteration.
