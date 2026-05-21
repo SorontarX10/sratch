@@ -54,6 +54,14 @@ pub fn call_tool(name: &str, args: &[Val]) -> Result<Val, String> {
         "up" => Ok(Val::Str(Rc::new(as_str(arg(args, 0)?)?.to_uppercase()))),
         "lo" => Ok(Val::Str(Rc::new(as_str(arg(args, 0)?)?.to_lowercase()))),
         "trim" => Ok(Val::Str(Rc::new(as_str(arg(args, 0)?)?.trim().to_string()))),
+        "tk" => {
+            // Approximate BPE token count. Designed for code-ish input:
+            // alphanumeric runs cost ceil(len/4) tokens (BPE typically
+            // merges 3-4 chars), punctuation/symbol = 1 token each,
+            // whitespace folds into the following token.
+            let s = as_str(arg(args, 0)?)?;
+            Ok(Val::Num(approx_tokens(s.as_str()) as f64))
+        }
         "has" => {
             match arg(args, 0)? {
                 Val::Dict(d) => {
@@ -145,6 +153,77 @@ pub fn call_tool(name: &str, args: &[Val]) -> Result<Val, String> {
 
         _ => Err(format!("unknown tool #{}", name)),
     }
+}
+
+pub fn approx_tokens(s: &str) -> usize {
+    let b = s.as_bytes();
+    let mut i = 0;
+    let mut tokens = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        if c.is_ascii_alphanumeric() || c == b'_' {
+            let start = i;
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                i += 1;
+            }
+            let len = i - start;
+            tokens += (len + 3) / 4;
+        } else {
+            tokens += 1;
+            i += 1;
+        }
+    }
+    tokens.max(if s.is_empty() { 0 } else { 1 })
+}
+
+/// `s =~ pat` glob match. Pattern supports `*` (any chars) and `?` (one char).
+/// Returns the substring of `s` matching the first `*` group, or — when the
+/// pattern has no `*` — the whole match. `Nil` if no match.
+pub fn glob_capture(s: &str, pat: &str) -> Val {
+    let sb = s.as_bytes();
+    let pb = pat.as_bytes();
+    for start in 0..=sb.len() {
+        if let Some((end, capt)) = glob_at(sb, pb, start) {
+            return match capt {
+                Some((a, b)) => Val::Str(Rc::new(String::from_utf8_lossy(&sb[a..b]).into_owned())),
+                None => Val::Str(Rc::new(String::from_utf8_lossy(&sb[start..end]).into_owned())),
+            };
+        }
+    }
+    Val::Nil
+}
+
+fn glob_at(s: &[u8], pat: &[u8], start: usize) -> Option<(usize, Option<(usize, usize)>)> {
+    let mut si = start;
+    let mut pi = 0;
+    while pi < pat.len() {
+        let pc = pat[pi];
+        if pc == b'*' {
+            let cap_start = si;
+            if pi + 1 == pat.len() {
+                return Some((s.len(), Some((cap_start, s.len()))));
+            }
+            for end in si..=s.len() {
+                if let Some((final_end, _)) = glob_at(s, &pat[pi + 1..], end) {
+                    return Some((final_end, Some((cap_start, end))));
+                }
+            }
+            return None;
+        } else if pc == b'?' {
+            if si >= s.len() { return None; }
+            si += 1;
+            pi += 1;
+        } else {
+            if si >= s.len() || s[si] != pc { return None; }
+            si += 1;
+            pi += 1;
+        }
+    }
+    Some((si, None))
 }
 
 fn arg(args: &[Val], i: usize) -> Result<Val, String> {

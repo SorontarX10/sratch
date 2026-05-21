@@ -6,7 +6,7 @@ pub enum Tok {
     Str(String),
     Ident(String),
     Plus, Minus, Star, Slash, Percent,
-    Eq, EqEq, BangEq, Lt, Gt, Le, Ge,
+    Eq, EqEq, BangEq, Lt, Gt, Le, Ge, EqTilde,
     Amp, Pipe, Bang,
     LP, RP, LBr, RBr, LBk, RBk,
     Comma, Semi, Colon, Dot, Nl,
@@ -150,7 +150,11 @@ impl<'a> Lexer<'a> {
                 }
                 b'=' => {
                     self.bump();
-                    if self.peek(0) == b'=' { self.bump(); Tok::EqEq } else { Tok::Eq }
+                    match self.peek(0) {
+                        b'=' => { self.bump(); Tok::EqEq }
+                        b'~' => { self.bump(); Tok::EqTilde }
+                        _ => Tok::Eq,
+                    }
                 }
                 b'!' => {
                     self.bump();

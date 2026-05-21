@@ -44,6 +44,9 @@ Source files use the `.sra` extension.
 | `@p %"claude-opus-4-7"`| call Claude with explicit model        |
 | `@p %"gpt-4o"`         | call OpenAI (provider chosen by name)  |
 | `~e`                   | run ReAct loop, return final `DONE:`   |
+| `@[u,a,u]`             | multi-turn (alternating user/assistant)|
+| `s=~"\D*"`             | glob match, returns capture or nil     |
+| `#tk(s)`               | approximate BPE token count            |
 | `#sh("ls -la")`        | run shell, returns stdout              |
 | `#get("https://...")`  | HTTP GET                               |
 | `"\R \D \S \G \O \E"`  | agent-vocab string escapes (lex-time)  |

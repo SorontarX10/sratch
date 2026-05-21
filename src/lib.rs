@@ -104,6 +104,45 @@ mod tests {
     }
 
     #[test]
+    fn tk_counts_tokens_approx() {
+        // alphanumeric run "hello" (5 chars) -> ceil(5/4)=2;
+        // " world" -> "world" (5)=2; total 4 ish.
+        let out = ev("^#tk(\"hello world\")").to_str();
+        let n: i64 = out.parse().unwrap();
+        assert!((3..=5).contains(&n), "expected ~4 tokens for 'hello world', got {}", n);
+        // punctuation each costs 1
+        let out2 = ev("^#tk(\"a+b*c\")").to_str();
+        let n2: i64 = out2.parse().unwrap();
+        assert!((5..=6).contains(&n2), "expected ~5 tokens for 'a+b*c', got {}", n2);
+    }
+
+    #[test]
+    fn glob_match_captures_after_marker() {
+        // capture text following a marker
+        let out = ev("^\"DONE:hello\"=~\"DONE:*\"").to_str();
+        assert_eq!(out, "hello");
+        // pattern not present -> nil ("n" in our printer)
+        let out2 = ev("^\"hi\"=~\"DONE:*\"").to_str();
+        assert_eq!(out2, "n");
+        // prefix*suffix capture
+        let out3 = ev("^\"[1,2,3]\"=~\"[*]\"").to_str();
+        assert_eq!(out3, "1,2,3");
+    }
+
+    #[test]
+    fn llm_multi_turn_via_list() {
+        // Mock returns a fixed reply; here we just assert that @list does
+        // not error and that the stub path handles a Val::List prompt.
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        std::env::remove_var("OPENAI_API_KEY");
+        std::env::remove_var("SRATCH_MOCK");
+        let out = ev("^@[\"hi\",\"hello\",\"more\"]").to_str();
+        // stub echoes the .to_str() of the original Val::List
+        assert!(out.starts_with("[stub:"));
+        assert!(out.contains("hi") && out.contains("hello") && out.contains("more"));
+    }
+
+    #[test]
     fn openai_model_routes_to_stub_without_key() {
         // gpt-* prefix is detected as OpenAI; without OPENAI_API_KEY
         // and SRATCH_MOCK the call must hit the deterministic stub

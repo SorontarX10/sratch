@@ -149,6 +149,7 @@ impl Parser {
             Tok::EqEq => BinOp::Eq, Tok::BangEq => BinOp::Ne,
             Tok::Lt => BinOp::Lt, Tok::Gtt => BinOp::Gt,
             Tok::Le => BinOp::Le, Tok::Ge => BinOp::Ge,
+            Tok::EqTilde => BinOp::Match,
             _ => return Ok(l),
         };
         self.bump();

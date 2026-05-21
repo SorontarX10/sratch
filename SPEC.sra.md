@@ -25,10 +25,13 @@ literals:  42  3.14  "txt"  [a,b]  {k:v}
 prelude:   T F N            (true / false / nil; user may shadow)
 ops:       + - * / %    (+ on str/list = concat; * str,n = repeat)
 cmp:       == != < > <= >=
+match:     s =~ pat        glob; * (any) ? (one); -> capture | nil
 logic:     & |              (and / or, short-circuit)  !x (not)
 index:     e[i]    e.k       (.k == e["k"])
 call:      f(a,b)
 @e         LLM(prompt=e)              -> string
+           e: str -> one-shot user message
+           e: list of strings -> multi-turn user/assistant/user/...
 @e %m      LLM with model m           -> string
 #t(a,b)    call tool t                -> value
 ~e         ReAct(initial=e)           -> final DONE: text
@@ -51,7 +54,7 @@ runtime string. `"\R\G"` builds the entire ReAct system+goal header.
 ```
 io:     p(..)  in()
 str:    len(x)  str(x)  num(x)  split(s,sep)  join(l,sep)  up(s)  lo(s)
-        trim(s)  has(x,k)
+        trim(s)  has(x,k)  tk(s)  (approximate BPE token count)
 list:   push(l,..)  pop(l)  rng(n)  rng(lo,hi)
 dict:   keys(d)  vals(d)  has(d,k)
 fs:     rd(p)  wr(p,s)

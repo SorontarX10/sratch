@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::builtins::call_tool;
+use crate::builtins::{call_tool, glob_capture};
 use crate::llm::llm_call;
 use crate::value::{Env, Fun, Val};
 use std::cell::RefCell;
@@ -293,6 +293,7 @@ fn bin(op: BinOp, a: Val, b: Val) -> Result<Val, String> {
         }
         Eq => Val::Bool(a.eq_val(&b)),
         Ne => Val::Bool(!a.eq_val(&b)),
+        Match => glob_capture(&a.to_str(), &b.to_str()),
         Lt => Val::Bool(cmp_num(&a, &b)? < 0),
         Gt => Val::Bool(cmp_num(&a, &b)? > 0),
         Le => Val::Bool(cmp_num(&a, &b)? <= 0),

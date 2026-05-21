@@ -34,7 +34,7 @@ pub enum Stmt {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum BinOp { Add, Sub, Mul, Div, Mod, Eq, Ne, Lt, Gt, Le, Ge, And, Or }
+pub enum BinOp { Add, Sub, Mul, Div, Mod, Eq, Ne, Lt, Gt, Le, Ge, And, Or, Match }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UnOp { Neg, Not }

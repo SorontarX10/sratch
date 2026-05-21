@@ -17,7 +17,6 @@ static MOCK_IDX: AtomicUsize = AtomicUsize::new(0);
 ///   2. provider API call via curl when its key env var is set
 ///   3. fallthrough stub  — keeps programs runnable offline
 pub fn llm_call(prompt: &Val, model: Option<&Val>) -> Result<Val, String> {
-    let p = prompt.to_str();
     let m = model.map(|v| v.to_str()).unwrap_or_else(|| {
         std::env::var("SRATCH_MODEL").unwrap_or_else(|_| "claude-haiku-4-5".into())
     });
@@ -30,10 +29,33 @@ pub fn llm_call(prompt: &Val, model: Option<&Val>) -> Result<Val, String> {
         }
     }
 
+    let msgs = build_messages(prompt);
     if is_openai(&m) {
-        openai_call(&m, &p)
+        openai_call(&m, &msgs, prompt)
     } else {
-        anthropic_call(&m, &p)
+        anthropic_call(&m, &msgs, prompt)
+    }
+}
+
+/// Builds the `"messages"` JSON array body from either a single prompt
+/// string (one user message) or a Val::List of alternating user/assistant
+/// strings (multi-turn).
+fn build_messages(p: &Val) -> String {
+    match p {
+        Val::List(l) => {
+            let items = l.borrow();
+            let mut parts: Vec<String> = Vec::with_capacity(items.len());
+            for (i, m) in items.iter().enumerate() {
+                let role = if i % 2 == 0 { "user" } else { "assistant" };
+                let content = json_encode(&Val::Str(Rc::new(m.to_str())));
+                parts.push(format!(r#"{{"role":"{}","content":{}}}"#, role, content));
+            }
+            parts.join(",")
+        }
+        other => {
+            let content = json_encode(&Val::Str(Rc::new(other.to_str())));
+            format!(r#"{{"role":"user","content":{}}}"#, content)
+        }
     }
 }
 
@@ -48,16 +70,15 @@ fn is_openai(m: &str) -> bool {
         || l.starts_with("text-")
 }
 
-fn anthropic_call(model: &str, prompt: &str) -> Result<Val, String> {
+fn anthropic_call(model: &str, msgs: &str, original: &Val) -> Result<Val, String> {
     let Ok(key) = std::env::var("ANTHROPIC_API_KEY") else {
-        return Ok(Val::Str(Rc::new(format!("[stub:{}] {}", model, prompt))));
+        return Ok(Val::Str(Rc::new(format!("[stub:{}] {}", model, original.to_str()))));
     };
     let base = std::env::var("ANTHROPIC_BASE_URL")
         .unwrap_or_else(|_| "https://api.anthropic.com".into());
     let body = format!(
-        r#"{{"model":"{}","max_tokens":1024,"messages":[{{"role":"user","content":{}}}]}}"#,
-        model,
-        json_encode(&Val::Str(Rc::new(prompt.to_string()))),
+        r#"{{"model":"{}","max_tokens":1024,"messages":[{}]}}"#,
+        model, msgs,
     );
     let out = Command::new("curl")
         .args([
@@ -74,16 +95,15 @@ fn anthropic_call(model: &str, prompt: &str) -> Result<Val, String> {
     Ok(Val::Str(Rc::new(extract_text(&raw, "\"text\":\"").unwrap_or(raw))))
 }
 
-fn openai_call(model: &str, prompt: &str) -> Result<Val, String> {
+fn openai_call(model: &str, msgs: &str, original: &Val) -> Result<Val, String> {
     let Ok(key) = std::env::var("OPENAI_API_KEY") else {
-        return Ok(Val::Str(Rc::new(format!("[stub:{}] {}", model, prompt))));
+        return Ok(Val::Str(Rc::new(format!("[stub:{}] {}", model, original.to_str()))));
     };
     let base = std::env::var("OPENAI_BASE_URL")
         .unwrap_or_else(|_| "https://api.openai.com".into());
     let body = format!(
-        r#"{{"model":"{}","messages":[{{"role":"user","content":{}}}]}}"#,
-        model,
-        json_encode(&Val::Str(Rc::new(prompt.to_string()))),
+        r#"{{"model":"{}","messages":[{}]}}"#,
+        model, msgs,
     );
     let out = Command::new("curl")
         .args([
