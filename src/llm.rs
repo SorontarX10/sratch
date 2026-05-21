@@ -8,11 +8,14 @@ static MOCK_IDX: AtomicUsize = AtomicUsize::new(0);
 
 /// @prompt  or  @prompt %model
 ///
+/// Provider dispatch is by model-name prefix:
+///   gpt-* / o1* / o3* / o4* / chatgpt* / text-*   -> OpenAI
+///   everything else (default claude-haiku-4-5)    -> Anthropic
+///
 /// Resolution order:
-///   1. SRATCH_MOCK     — newline-`---`-newline separated scripted replies
-///                        cycled in order (great for testing agent loops)
-///   2. ANTHROPIC_API_KEY — real Anthropic call via curl
-///   3. fallthrough     — deterministic stub so programs remain runnable
+///   1. SRATCH_MOCK       — scripted replies for testing
+///   2. provider API call via curl when its key env var is set
+///   3. fallthrough stub  — keeps programs runnable offline
 pub fn llm_call(prompt: &Val, model: Option<&Val>) -> Result<Val, String> {
     let p = prompt.to_str();
     let m = model.map(|v| v.to_str()).unwrap_or_else(|| {
@@ -27,16 +30,39 @@ pub fn llm_call(prompt: &Val, model: Option<&Val>) -> Result<Val, String> {
         }
     }
 
-    let Ok(key) = std::env::var("ANTHROPIC_API_KEY") else {
-        return Ok(Val::Str(Rc::new(format!("[stub:{}] {}", m, p))));
-    };
+    if is_openai(&m) {
+        openai_call(&m, &p)
+    } else {
+        anthropic_call(&m, &p)
+    }
+}
 
-    let body = build_body(&m, &p);
+fn is_openai(m: &str) -> bool {
+    let l = m.to_lowercase();
+    l.starts_with("gpt-")
+        || l.starts_with("gpt5")
+        || l.starts_with("o1")
+        || l.starts_with("o3")
+        || l.starts_with("o4")
+        || l.starts_with("chatgpt")
+        || l.starts_with("text-")
+}
+
+fn anthropic_call(model: &str, prompt: &str) -> Result<Val, String> {
+    let Ok(key) = std::env::var("ANTHROPIC_API_KEY") else {
+        return Ok(Val::Str(Rc::new(format!("[stub:{}] {}", model, prompt))));
+    };
+    let base = std::env::var("ANTHROPIC_BASE_URL")
+        .unwrap_or_else(|_| "https://api.anthropic.com".into());
+    let body = format!(
+        r#"{{"model":"{}","max_tokens":1024,"messages":[{{"role":"user","content":{}}}]}}"#,
+        model,
+        json_encode(&Val::Str(Rc::new(prompt.to_string()))),
+    );
     let out = Command::new("curl")
         .args([
-            "-sS",
-            "-X", "POST",
-            "https://api.anthropic.com/v1/messages",
+            "-sS", "-X", "POST",
+            &format!("{}/v1/messages", base),
             "-H", &format!("x-api-key: {}", key),
             "-H", "anthropic-version: 2023-06-01",
             "-H", "content-type: application/json",
@@ -44,24 +70,39 @@ pub fn llm_call(prompt: &Val, model: Option<&Val>) -> Result<Val, String> {
         ])
         .output()
         .map_err(|e| e.to_string())?;
-
     let raw = String::from_utf8_lossy(&out.stdout).into_owned();
-    Ok(Val::Str(Rc::new(extract_text(&raw).unwrap_or(raw))))
+    Ok(Val::Str(Rc::new(extract_text(&raw, "\"text\":\"").unwrap_or(raw))))
 }
 
-fn build_body(model: &str, prompt: &str) -> String {
-    let prompt_str = Val::Str(Rc::new(prompt.to_string()));
-    format!(
-        r#"{{"model":"{}","max_tokens":1024,"messages":[{{"role":"user","content":{}}}]}}"#,
+fn openai_call(model: &str, prompt: &str) -> Result<Val, String> {
+    let Ok(key) = std::env::var("OPENAI_API_KEY") else {
+        return Ok(Val::Str(Rc::new(format!("[stub:{}] {}", model, prompt))));
+    };
+    let base = std::env::var("OPENAI_BASE_URL")
+        .unwrap_or_else(|_| "https://api.openai.com".into());
+    let body = format!(
+        r#"{{"model":"{}","messages":[{{"role":"user","content":{}}}]}}"#,
         model,
-        json_encode(&prompt_str),
-    )
+        json_encode(&Val::Str(Rc::new(prompt.to_string()))),
+    );
+    let out = Command::new("curl")
+        .args([
+            "-sS", "-X", "POST",
+            &format!("{}/v1/chat/completions", base),
+            "-H", &format!("authorization: Bearer {}", key),
+            "-H", "content-type: application/json",
+            "-d", &body,
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    let raw = String::from_utf8_lossy(&out.stdout).into_owned();
+    Ok(Val::Str(Rc::new(extract_text(&raw, "\"content\":\"").unwrap_or(raw))))
 }
 
-/// Minimal extractor — pulls the first `"text":"..."` substring out of the
-/// Anthropic JSON response without dragging in a full JSON dep.
-fn extract_text(s: &str) -> Option<String> {
-    let key = "\"text\":\"";
+/// Pulls the first `<key>...` substring out of a JSON response, decoding
+/// the common escape sequences. Used for both Anthropic (`"text":"`) and
+/// OpenAI (`"content":"`) without dragging in a full JSON dep.
+fn extract_text(s: &str, key: &str) -> Option<String> {
     let i = s.find(key)? + key.len();
     let bytes = s.as_bytes();
     let mut out = String::new();
@@ -88,4 +129,3 @@ fn extract_text(s: &str) -> Option<String> {
     }
     Some(out)
 }
-

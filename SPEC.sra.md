@@ -1,6 +1,7 @@
 # Sratch — token-economy spec
 
-Single-char keywords, sigil-led statements. Newline OR `;` ends a statement.
+Source files use the `.sra` extension. Single-char keywords,
+sigil-led statements. Newline OR `;` ends a statement.
 
 ## stmt
 ```
@@ -59,9 +60,18 @@ json:   j(v)        encode
         uj(s)       decode
 ```
 
+## providers
+`@` / `~` dispatch by model-name prefix:
+- `claude-*` (default) → Anthropic; needs `ANTHROPIC_API_KEY`
+- `gpt-*` / `o1*` / `o3*` / `o4*` / `chatgpt*` → OpenAI; needs `OPENAI_API_KEY`
+
+Without the matching key, the call returns a deterministic stub
+(`[stub:<model>] <prompt>`) so programs remain runnable offline.
+
 ## env
-- `ANTHROPIC_API_KEY` — when set, `@` hits Anthropic; otherwise returns a stub.
-- `SRATCH_MODEL` — default model id (default: `claude-haiku-4-5`).
+- `SRATCH_MODEL` — default model id (default: `claude-haiku-4-5`)
+- `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` — provider credentials
+- `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` — override API base URLs
 
 ## comments
 A line beginning (after whitespace) with `'` is a comment until newline.

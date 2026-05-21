@@ -104,6 +104,19 @@ mod tests {
     }
 
     #[test]
+    fn openai_model_routes_to_stub_without_key() {
+        // gpt-* prefix is detected as OpenAI; without OPENAI_API_KEY
+        // and SRATCH_MOCK the call must hit the deterministic stub
+        // (not the Anthropic path).
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        std::env::remove_var("OPENAI_API_KEY");
+        std::env::remove_var("SRATCH_MOCK");
+        let out = ev("^@\"hi\" %\"gpt-4o\"").to_str();
+        assert!(out.contains("gpt-4o"), "expected gpt-4o in stub, got: {}", out);
+        assert!(out.contains("hi"));
+    }
+
+    #[test]
     fn agent_loop_primitive() {
         // ~prompt runs a ReAct loop. Drive it with SRATCH_MOCK so the
         // first reply runs a shell, the second emits DONE.

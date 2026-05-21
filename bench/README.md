@@ -11,13 +11,13 @@ Chars (excluding trailing newline), measured on the files in this dir:
 
 | file        | chars | lines | vs sratch |
 |-------------|------:|------:|----------:|
-| sratch.sr   |    17 |     1 |      1.0× |
+| sratch.sra  |    17 |     1 |      1.0× |
 | bash.sh     |   473 |     6 |     27.8× |
 | py.py       |   417 |     9 |     24.5× |
 | js.js       |   562 |     7 |     33.0× |
 | go.go       |  1094 |    18 |     64.3× |
 
-`bench/sratch.sr` in full:
+`bench/sratch.sra` in full:
 
 ```
 >~("\R\G"+#in())
