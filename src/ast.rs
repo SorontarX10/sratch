@@ -14,6 +14,7 @@ pub enum Expr {
     Call(Box<Expr>, Vec<Expr>),   // f(args) — f may be Ident or computed
     Tool(String, Vec<Expr>),      // #name(args)
     Llm(Box<Expr>, Option<Box<Expr>>), // @prompt or @prompt %model
+    Agent(Box<Expr>),             // ~prompt — run full ReAct loop, return DONE text
 }
 
 #[derive(Debug, Clone)]
@@ -33,7 +34,7 @@ pub enum Stmt {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum BinOp { Add, Sub, Mul, Div, Mod, Eq, Ne, Lt, Gt, Le, Ge, And, Or }
+pub enum BinOp { Add, Sub, Mul, Div, Mod, Eq, Ne, Lt, Gt, Le, Ge, And, Or, Match }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UnOp { Neg, Not }

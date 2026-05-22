@@ -101,12 +101,33 @@ impl fmt::Display for Val {
 #[derive(Default)]
 pub struct Env {
     pub scopes: Vec<HashMap<String, Val>>,
+    /// Stack of scope indices that begin a function call. `set` only walks
+    /// scopes up to (but not crossing) the current barrier — this gives
+    /// proper lexical scoping inside function bodies so that a variable
+    /// named `x` in an inner function does not silently mutate a caller's
+    /// `x`. The outermost scope (index 0) is still treated as global and
+    /// is always writable when an existing binding lives there; this
+    /// preserves the common pattern of "init at top level, mutate from
+    /// helpers."
+    pub fn_barriers: Vec<usize>,
 }
 
 impl Env {
-    pub fn new() -> Self { Self { scopes: vec![HashMap::new()] } }
+    pub fn new() -> Self {
+        Self { scopes: vec![HashMap::new()], fn_barriers: Vec::new() }
+    }
     pub fn push(&mut self) { self.scopes.push(HashMap::new()); }
     pub fn pop(&mut self) { self.scopes.pop(); }
+
+    pub fn enter_fn(&mut self) {
+        self.fn_barriers.push(self.scopes.len());
+        self.scopes.push(HashMap::new());
+    }
+
+    pub fn leave_fn(&mut self) {
+        self.fn_barriers.pop();
+        self.scopes.pop();
+    }
 
     pub fn get(&self, n: &str) -> Option<Val> {
         for s in self.scopes.iter().rev() {
@@ -116,9 +137,21 @@ impl Env {
     }
 
     pub fn set(&mut self, n: &str, v: Val) {
-        for s in self.scopes.iter_mut().rev() {
-            if s.contains_key(n) { s.insert(n.to_string(), v); return; }
+        let barrier = *self.fn_barriers.last().unwrap_or(&0);
+        // walk inner-to-outer within the current function frame
+        for i in (barrier..self.scopes.len()).rev() {
+            if self.scopes[i].contains_key(n) {
+                self.scopes[i].insert(n.to_string(), v);
+                return;
+            }
         }
+        // if we're inside a function, fall through to the global scope
+        // so that pre-declared globals stay mutable from anywhere
+        if barrier > 0 && self.scopes[0].contains_key(n) {
+            self.scopes[0].insert(n.to_string(), v);
+            return;
+        }
+        // otherwise create a new binding in the innermost scope
         self.scopes.last_mut().unwrap().insert(n.to_string(), v);
     }
 

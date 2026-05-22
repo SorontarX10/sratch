@@ -149,6 +149,7 @@ impl Parser {
             Tok::EqEq => BinOp::Eq, Tok::BangEq => BinOp::Ne,
             Tok::Lt => BinOp::Lt, Tok::Gtt => BinOp::Gt,
             Tok::Le => BinOp::Le, Tok::Ge => BinOp::Ge,
+            Tok::EqTilde => BinOp::Match,
             _ => return Ok(l),
         };
         self.bump();
@@ -237,6 +238,11 @@ impl Parser {
                     Some(Box::new(self.parse_unary()?))
                 } else { None };
                 Ok(Expr::Llm(Box::new(p), m))
+            }
+            Tok::Tilde => {
+                self.bump();
+                let e = self.parse_unary()?;
+                Ok(Expr::Agent(Box::new(e)))
             }
             Tok::Hash => {
                 self.bump();

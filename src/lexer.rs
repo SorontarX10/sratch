@@ -6,7 +6,7 @@ pub enum Tok {
     Str(String),
     Ident(String),
     Plus, Minus, Star, Slash, Percent,
-    Eq, EqEq, BangEq, Lt, Gt, Le, Ge,
+    Eq, EqEq, BangEq, Lt, Gt, Le, Ge, EqTilde,
     Amp, Pipe, Bang,
     LP, RP, LBr, RBr, LBk, RBk,
     Comma, Semi, Colon, Dot, Nl,
@@ -16,6 +16,7 @@ pub enum Tok {
     Hash,     // #  tool
     Gtt,      // >  print
     StarQ,    // *? while
+    Tilde,    // ~  agent loop
     Eof,
 }
 
@@ -74,6 +75,14 @@ impl<'a> Lexer<'a> {
                     b'\\' => s.push('\\'),
                     b'"' => s.push('"'),
                     b'0' => s.push('\0'),
+                    // Agent vocabulary: Huffman-style escape dictionary.
+                    // Compresses common ReAct strings inline at lex time.
+                    b'R' => s.push_str("ReAct. Reply SH:<cmd> or DONE:<text>\n"),
+                    b'D' => s.push_str("DONE:"),
+                    b'S' => s.push_str("SH:"),
+                    b'G' => s.push_str("GOAL:"),
+                    b'O' => s.push_str("\nO:"),
+                    b'E' => s.push_str("\nE"),
                     other => s.push(other as char),
                 }
             } else {
@@ -130,6 +139,7 @@ impl<'a> Lexer<'a> {
                 b'?' => { self.bump(); Tok::Quest }
                 b'@' => { self.bump(); Tok::At }
                 b'#' => { self.bump(); Tok::Hash }
+                b'~' => { self.bump(); Tok::Tilde }
                 b'>' => {
                     self.bump();
                     if self.peek(0) == b'=' { self.bump(); Tok::Ge } else { Tok::Gtt }
@@ -140,7 +150,11 @@ impl<'a> Lexer<'a> {
                 }
                 b'=' => {
                     self.bump();
-                    if self.peek(0) == b'=' { self.bump(); Tok::EqEq } else { Tok::Eq }
+                    match self.peek(0) {
+                        b'=' => { self.bump(); Tok::EqEq }
+                        b'~' => { self.bump(); Tok::EqTilde }
+                        _ => Tok::Eq,
+                    }
                 }
                 b'!' => {
                     self.bump();

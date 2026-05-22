@@ -1,5 +1,9 @@
 use crate::ast::*;
-use crate::builtins::call_tool;
+use crate::ast::{Expr, Stmt};
+use crate::builtins::{call_tool, glob_capture};
+use crate::lexer::Lexer;
+use crate::parser::Parser;
+use std::collections::HashSet;
 use crate::llm::llm_call;
 use crate::value::{Env, Fun, Val};
 use std::cell::RefCell;
@@ -205,23 +209,112 @@ impl Interp {
             Expr::Tool(name, args) => {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args { argv.push(self.eval(a)?); }
-                call_tool(name, &argv)?
+                // #inc(path) reads, parses, and evaluates another .sra
+                // file in the current scope. Needs interpreter access,
+                // so it lives here rather than in builtins.rs.
+                if name == "inc" {
+                    let path = argv.first()
+                        .ok_or("inc: path required")?
+                        .to_str();
+                    let prefix = argv.get(1).map(|v| v.to_str());
+                    let src = std::fs::read_to_string(&path)
+                        .map_err(|e| format!("inc {}: {}", path, e))?;
+                    let toks = Lexer::new(&src).tokens()?;
+                    let mut prog = Parser::new(toks).program()?;
+
+                    if let Some(pfx) = prefix {
+                        // Collect all top-level def/assign names — those
+                        // become "module-local" and get mangled with the
+                        // prefix everywhere they appear.
+                        let mut defs: HashSet<String> = HashSet::new();
+                        for s in &prog {
+                            match s {
+                                Stmt::Def(n, ..) | Stmt::Assign(n, _) => {
+                                    defs.insert(n.clone());
+                                }
+                                _ => {}
+                            }
+                        }
+                        let pfx_owned = pfx.clone();
+                        let mangle = move |n: &str| format!("{}_{}", pfx_owned, n);
+                        rewrite_stmts(&mut prog, &defs, &mangle);
+
+                        for s in &prog {
+                            match self.exec(s)? {
+                                Flow::Norm => {}
+                                Flow::Ret(v) => return Ok(v),
+                                _ => return Err("brk/cnt outside loop in inc".into()),
+                            }
+                        }
+                        // Expose the module as a dict so callers can write
+                        // `M.foo(args)` instead of remembering mangled names.
+                        let mut entries: Vec<(Val, Val)> = Vec::new();
+                        for name in &defs {
+                            let mangled = mangle(name);
+                            if let Some(v) = self.env.get(&mangled) {
+                                entries.push((Val::Str(Rc::new(name.clone())), v));
+                            }
+                        }
+                        self.env.set(&pfx, Val::Dict(Rc::new(RefCell::new(entries))));
+                        return Ok(Val::Nil);
+                    }
+
+                    for s in &prog {
+                        match self.exec(s)? {
+                            Flow::Norm => {}
+                            Flow::Ret(v) => return Ok(v),
+                            _ => return Err("brk/cnt outside loop in inc".into()),
+                        }
+                    }
+                    Val::Nil
+                } else {
+                    call_tool(name, &argv)?
+                }
             }
             Expr::Llm(p, m) => {
                 let pv = self.eval(p)?;
                 let mv = match m { Some(x) => Some(self.eval(x)?), None => None };
                 llm_call(&pv, mv.as_ref())?
             }
+            Expr::Agent(initial) => {
+                let mut h = self.eval(initial)?.to_str();
+                let max: usize = std::env::var("SRATCH_AGENT_MAX")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(20);
+                let trace = std::env::var("SRATCH_TRACE").is_ok();
+                let mut out = Val::Str(Rc::new(String::new()));
+                for _ in 0..max {
+                    let r = llm_call(&Val::Str(Rc::new(h.clone())), None)?;
+                    let rs = r.to_str();
+                    if trace { eprintln!("<<{}", rs); }
+                    if rs.contains("DONE:") {
+                        out = Val::Str(Rc::new(rs));
+                        break;
+                    }
+                    if let Some(i) = rs.find("SH:") {
+                        let cmd = rs[i + 3..].trim();
+                        let obs = call_tool("sh", &[Val::Str(Rc::new(cmd.to_string()))])?;
+                        let os = obs.to_str();
+                        if trace { eprintln!(">>O:{}", os); }
+                        h.push_str("\nO:");
+                        h.push_str(&os);
+                    } else {
+                        if trace { eprintln!(">>E"); }
+                        h.push_str("\nE");
+                    }
+                    out = Val::Str(Rc::new(rs));
+                }
+                out
+            }
         })
     }
 
     fn call_fn(&mut self, f: &Fun, args: Vec<Val>) -> Result<Val, String> {
-        self.env.push();
+        self.env.enter_fn();
         for (i, p) in f.params.iter().enumerate() {
             self.env.set_local(p, args.get(i).cloned().unwrap_or(Val::Nil));
         }
         let r = self.exec_block(&f.body);
-        self.env.pop();
+        self.env.leave_fn();
         match r? {
             Flow::Ret(v) => Ok(v),
             Flow::Norm => Ok(Val::Nil),
@@ -264,6 +357,7 @@ fn bin(op: BinOp, a: Val, b: Val) -> Result<Val, String> {
         }
         Eq => Val::Bool(a.eq_val(&b)),
         Ne => Val::Bool(!a.eq_val(&b)),
+        Match => glob_capture(&a.to_str(), &b.to_str()),
         Lt => Val::Bool(cmp_num(&a, &b)? < 0),
         Gt => Val::Bool(cmp_num(&a, &b)? > 0),
         Le => Val::Bool(cmp_num(&a, &b)? <= 0),
@@ -306,5 +400,81 @@ fn index(a: Val, i: Val) -> Result<Val, String> {
             Ok(Val::Nil)
         }
         _ => Err("not indexable".into()),
+    }
+}
+
+// ---- AST mangling for #inc(path, prefix) ----
+// Mangles every top-level def/assign name and every identifier that
+// references one of those names. References inside function bodies that
+// happen to be shadowed by parameters of the same name will also be
+// mangled — a known limitation; in practice module-internal names are
+// underscored and don't collide with parameters.
+fn rewrite_stmts(stmts: &mut [Stmt], defs: &HashSet<String>, mangle: &impl Fn(&str) -> String) {
+    for s in stmts { rewrite_stmt(s, defs, mangle); }
+}
+
+fn rewrite_stmt(s: &mut Stmt, defs: &HashSet<String>, mangle: &impl Fn(&str) -> String) {
+    match s {
+        Stmt::Expr(e) => rewrite_expr(e, defs, mangle),
+        Stmt::Assign(n, e) => {
+            if defs.contains(n) { *n = mangle(n); }
+            rewrite_expr(e, defs, mangle);
+        }
+        Stmt::AssignIdx(a, i, v) => {
+            rewrite_expr(a, defs, mangle);
+            rewrite_expr(i, defs, mangle);
+            rewrite_expr(v, defs, mangle);
+        }
+        Stmt::Print(e) | Stmt::Return(e) => rewrite_expr(e, defs, mangle),
+        Stmt::If(c, t, e) => {
+            rewrite_expr(c, defs, mangle);
+            rewrite_stmts(t, defs, mangle);
+            if let Some(eb) = e { rewrite_stmts(eb, defs, mangle); }
+        }
+        Stmt::Repeat(n, b) => {
+            rewrite_expr(n, defs, mangle);
+            rewrite_stmts(b, defs, mangle);
+        }
+        Stmt::For(_, it, b) => {
+            rewrite_expr(it, defs, mangle);
+            rewrite_stmts(b, defs, mangle);
+        }
+        Stmt::While(c, b) => {
+            rewrite_expr(c, defs, mangle);
+            rewrite_stmts(b, defs, mangle);
+        }
+        Stmt::Def(n, _, b) => {
+            if defs.contains(n) { *n = mangle(n); }
+            rewrite_stmts(b, defs, mangle);
+        }
+        Stmt::Break | Stmt::Continue => {}
+    }
+}
+
+fn rewrite_expr(e: &mut Expr, defs: &HashSet<String>, mangle: &impl Fn(&str) -> String) {
+    match e {
+        Expr::Ident(n) => { if defs.contains(n) { *n = mangle(n); } }
+        Expr::List(items) => { for it in items { rewrite_expr(it, defs, mangle); } }
+        Expr::Dict(kvs) => {
+            for (k, v) in kvs {
+                rewrite_expr(k, defs, mangle);
+                rewrite_expr(v, defs, mangle);
+            }
+        }
+        Expr::Bin(_, a, b) => { rewrite_expr(a, defs, mangle); rewrite_expr(b, defs, mangle); }
+        Expr::Un(_, x) => rewrite_expr(x, defs, mangle),
+        Expr::Index(a, i) => { rewrite_expr(a, defs, mangle); rewrite_expr(i, defs, mangle); }
+        Expr::Field(a, _) => rewrite_expr(a, defs, mangle),
+        Expr::Call(f, args) => {
+            rewrite_expr(f, defs, mangle);
+            for a in args { rewrite_expr(a, defs, mangle); }
+        }
+        Expr::Tool(_, args) => { for a in args { rewrite_expr(a, defs, mangle); } }
+        Expr::Llm(p, m) => {
+            rewrite_expr(p, defs, mangle);
+            if let Some(mm) = m { rewrite_expr(mm, defs, mangle); }
+        }
+        Expr::Agent(p) => rewrite_expr(p, defs, mangle),
+        Expr::Num(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Nil => {}
     }
 }
