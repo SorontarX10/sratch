@@ -245,12 +245,12 @@ impl Interp {
     }
 
     fn call_fn(&mut self, f: &Fun, args: Vec<Val>) -> Result<Val, String> {
-        self.env.push();
+        self.env.enter_fn();
         for (i, p) in f.params.iter().enumerate() {
             self.env.set_local(p, args.get(i).cloned().unwrap_or(Val::Nil));
         }
         let r = self.exec_block(&f.body);
-        self.env.pop();
+        self.env.leave_fn();
         match r? {
             Flow::Ret(v) => Ok(v),
             Flow::Norm => Ok(Val::Nil),

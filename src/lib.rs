@@ -130,6 +130,33 @@ mod tests {
     }
 
     #[test]
+    fn function_scope_barrier_prevents_clobber() {
+        // Without the barrier, the inner function's S=[] would walk
+        // outward and overwrite the outer function's S. With the
+        // barrier in place, both Ss are independent.
+        let src = r#"
+:inner(){S=[] #push(S,"inner") ^S}
+:outer(){S=[] #push(S,"outer") inner() #push(S,"after") ^S}
+^outer()
+"#;
+        let out = ev(src).to_str();
+        assert_eq!(out, "[outer,after]");
+    }
+
+    #[test]
+    fn global_state_remains_mutable_from_helpers() {
+        // Top-level declarations stay reachable: helpers can update them.
+        let src = r#"
+pi=0
+:bump(){pi=pi+1 ^pi}
+bump() bump() bump()
+^pi
+"#;
+        let out = ev(src).to_str();
+        assert_eq!(out, "3");
+    }
+
+    #[test]
     fn llm_multi_turn_via_list() {
         // Mock returns a fixed reply; here we just assert that @list does
         // not error and that the stub path handles a Val::List prompt.

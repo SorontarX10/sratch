@@ -76,6 +76,19 @@ Without the matching key, the call returns a deterministic stub
 - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` — provider credentials
 - `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` — override API base URLs
 
+## scoping
+Each function call sets a *barrier*. Inside a function, assignments
+(`x=...`) walk inner-to-outer scopes only up to that barrier — so an
+inner function cannot accidentally clobber an outer function's local
+of the same name. As a convenience for shared mutable state, the
+outermost (global) scope is always reachable: if a variable is
+pre-declared at top level, helper functions can read and update it.
+This is what makes the parser-in-Sratch work: `toks=[] pi=0` at top
+level lets `peek()` / `bump()` mutate the same cursor.
+
+`for` / repeat loops still push a transient scope per iteration;
+`while` does not.
+
 ## comments
 A line beginning (after whitespace) with `'` is a comment until newline.
 Comments cost tokens — omit in shipping agent code.
