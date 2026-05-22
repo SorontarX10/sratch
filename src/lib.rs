@@ -144,6 +144,42 @@ mod tests {
     }
 
     #[test]
+    fn self_hosted_py_transpile_runs() {
+        // Sratch source -> Python source -> python3 runs it.
+        // Skips when run from a working dir without compiler/ or python3.
+        if !std::path::Path::new("compiler/emit_py.sra").exists() {
+            return;
+        }
+        if std::process::Command::new("python3").arg("--version")
+            .output().is_err() { return; }
+        let src = r#"
+#inc("compiler/lex.sra")
+#inc("compiler/parse.sra")
+#inc("compiler/emit_py.sra")
+toks=[] pi=0
+prog=":fact(n){?n<=1{^1} ^n*fact(n-1)}
+>fact(5)"
+py=py_emit(parse(lex(prog)))
+#wr("/tmp/sratch_py_test.py",py)
+>#sh("python3 /tmp/sratch_py_test.py")
+"#;
+        let out = ev(src).to_str();
+        // ev() prints to real stdout; we only get the final value back.
+        // Just assert no error path was taken and the result is Nil-ish.
+        // The actual fact(5)=120 went to stdout during eval.
+        let _ = out;
+        // Verify by reading the generated file and re-running explicitly.
+        let py = std::fs::read_to_string("/tmp/sratch_py_test.py").unwrap();
+        assert!(py.contains("def fact("));
+        assert!(py.contains("print(fact(5))"));
+        let run = std::process::Command::new("python3")
+            .arg("/tmp/sratch_py_test.py")
+            .output().unwrap();
+        let stdout = String::from_utf8_lossy(&run.stdout).trim().to_string();
+        assert_eq!(stdout, "120");
+    }
+
+    #[test]
     fn self_hosted_eval_runs_factorial() {
         // Closes the bootstrap: lex + parse + eval, all in Sratch,
         // computing fact(6) inside the inner interpreter.

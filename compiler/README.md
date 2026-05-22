@@ -23,8 +23,15 @@ Sratch compiler written in Sratch.
    == parse(src). `compiler/emit_demo.sra` runs the full round trip
    and prints "ROUND-TRIP OK".
 
-4. **emit_py.sra** — Sratch -> Python transpiler (planned). Same AST
-   traversal, different target.
+4. **emit_py.sra** — Sratch -> Python transpiler ✅
+   Same traversal scaffold as emit.sra, different target language.
+   Maps Sratch sigils to Python (`?{}:{}` -> if/else, `*n{}` -> for
+   in range, `*?` -> while, `:f(){}` -> def). Forwards common `#`
+   builtins to Python idioms (`#push(L,x)` -> `L.append(x)`,
+   `#has(d,k)` -> `k in d`, etc.). Includes a small Python prelude
+   wrapping subprocess/urllib/json. `emit_py_demo.sra` transpiles
+   `:fact(n){?n<=1{^1} ^n*fact(n-1)}` and runs the result through
+   `python3`, getting `720`.
 
 5. **eval.sra** — tree-walking evaluator in Sratch ✅
    Closes the bootstrap. Maintains its own environment as
