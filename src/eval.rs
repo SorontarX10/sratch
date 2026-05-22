@@ -1,5 +1,7 @@
 use crate::ast::*;
 use crate::builtins::{call_tool, glob_capture};
+use crate::lexer::Lexer;
+use crate::parser::Parser;
 use crate::llm::llm_call;
 use crate::value::{Env, Fun, Val};
 use std::cell::RefCell;
@@ -205,7 +207,28 @@ impl Interp {
             Expr::Tool(name, args) => {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args { argv.push(self.eval(a)?); }
-                call_tool(name, &argv)?
+                // #inc(path) reads, parses, and evaluates another .sra
+                // file in the current scope. Needs interpreter access,
+                // so it lives here rather than in builtins.rs.
+                if name == "inc" {
+                    let path = argv.first()
+                        .ok_or("inc: path required")?
+                        .to_str();
+                    let src = std::fs::read_to_string(&path)
+                        .map_err(|e| format!("inc {}: {}", path, e))?;
+                    let toks = Lexer::new(&src).tokens()?;
+                    let prog = Parser::new(toks).program()?;
+                    for s in &prog {
+                        match self.exec(s)? {
+                            Flow::Norm => {}
+                            Flow::Ret(v) => return Ok(v),
+                            _ => return Err("brk/cnt outside loop in inc".into()),
+                        }
+                    }
+                    Val::Nil
+                } else {
+                    call_tool(name, &argv)?
+                }
             }
             Expr::Llm(p, m) => {
                 let pv = self.eval(p)?;

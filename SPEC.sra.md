@@ -61,6 +61,7 @@ fs:     rd(p)  wr(p,s)
 sys:    sh(cmd)  get(url)  post(url,body)
 json:   j(v)        encode
         uj(s)       decode
+mod:    inc(path)   read+parse+eval another .sra in current scope
 ```
 
 ## providers
@@ -75,6 +76,15 @@ Without the matching key, the call returns a deterministic stub
 - `SRATCH_MODEL` — default model id (default: `claude-haiku-4-5`)
 - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` — provider credentials
 - `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` — override API base URLs
+
+## gotchas
+- **Statements on one line.** Sratch is greedy: `r="" *d{...}` parses
+  the `*` as the multiplication operator (`""*d`), then sees `{` as
+  a dict literal — usually not what you want. Separate statements
+  with newlines or `;`. (`*?` is a single token, so while-loops
+  packed on one line are safe.)
+- **No closures.** Functions are looked up by name in env at call
+  time; they don't capture their definition environment.
 
 ## scoping
 Each function call sets a *barrier*. Inside a function, assignments

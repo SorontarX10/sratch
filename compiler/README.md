@@ -16,13 +16,17 @@ Sratch compiler written in Sratch.
    from `lex.sra`, emits an AST encoded as nested lists. Mirrors the
    Pratt-style parser in `src/parser.rs`.
 
-3. **emit.sra** — code generator. Two backends planned:
-   - `emit_sra` — pretty-printer back to Sratch source (round-trips
-     parse/print as the first end-to-end correctness check).
-   - `emit_py` — Sratch → Python transpiler so an agent can ship its
-     reasoning as plain Python when needed.
+3. **emit.sra** — AST -> Sratch source pretty-printer ✅
+   Walks the AST nested-list form back to source. Wraps binaries in
+   parens for precedence safety; re-escapes string literals. Used as
+   the first end-to-end correctness check via parse(emit(parse(src)))
+   == parse(src). `compiler/emit_demo.sra` runs the full round trip
+   and prints "ROUND-TRIP OK".
 
-4. **eval.sra** — tree-walking evaluator in Sratch. Closes the loop:
+4. **emit_py.sra** — Sratch -> Python transpiler (planned). Same AST
+   traversal, different target.
+
+5. **eval.sra** — tree-walking evaluator in Sratch. Closes the loop:
    `eval(parse(lex(src)))` reproduces the Rust interpreter's behavior.
    At this point Sratch hosts itself.
 

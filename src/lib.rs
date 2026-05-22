@@ -144,6 +144,18 @@ mod tests {
     }
 
     #[test]
+    fn inc_loads_external_module() {
+        // Write a temp module that defines a function, include it,
+        // call the function.
+        let tmp = std::env::temp_dir().join("sratch_inc_test.sra");
+        std::fs::write(&tmp, ":dbl(x){^x*2}\n").unwrap();
+        let src = format!("#inc(\"{}\")\n^dbl(7)", tmp.display());
+        let out = ev(&src).to_str();
+        std::fs::remove_file(&tmp).ok();
+        assert_eq!(out, "14");
+    }
+
+    #[test]
     fn global_state_remains_mutable_from_helpers() {
         // Top-level declarations stay reachable: helpers can update them.
         let src = r#"
