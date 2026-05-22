@@ -203,6 +203,31 @@ ast=parse(lex(prog))
     }
 
     #[test]
+    fn js_transpile_round_trip() {
+        // Transpile Sratch -> JS, run it with node, compare output.
+        // Skipped if node or the compiler module isn't available.
+        if !std::path::Path::new("compiler/emit_js.sra").exists() { return; }
+        if std::process::Command::new("node").arg("--version").output().is_err() { return; }
+        let prog = std::env::temp_dir().join("sratch_js_prog.sra");
+        let js_out = std::env::temp_dir().join("sratch_js_out.js");
+        std::fs::write(&prog, ":sq(n){^n*n}\n>sq(7)\n>\"a\"+\"b\"\n").unwrap();
+        let driver = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("compiler/emit_js.sra","J")
+src=#rd("{prog}")
+js=J.emit_js(P.parse(L.lex(src)))
+#wr("{out}",js)
+^#sh("node {out}")
+"#, prog = prog.display(), out = js_out.display());
+        let out = ev(&driver).to_str();
+        std::fs::remove_file(&prog).ok();
+        std::fs::remove_file(&js_out).ok();
+        assert!(out.contains("49"), "expected sq(7)=49 in: {}", out);
+        assert!(out.contains("ab"), "expected 'ab' concat in: {}", out);
+    }
+
+    #[test]
     fn inc_with_prefix_namespaces_module() {
         // Module-local state (counter) plus a mutating helper that
         // updates it across calls. The prefix mangles both the

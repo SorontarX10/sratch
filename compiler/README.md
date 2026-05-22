@@ -23,15 +23,17 @@ Sratch compiler written in Sratch.
    == parse(src). `compiler/emit_demo.sra` runs the full round trip
    and prints "ROUND-TRIP OK".
 
-4. **emit_py.sra** — Sratch -> Python transpiler ✅
-   Same traversal scaffold as emit.sra, different target language.
-   Maps Sratch sigils to Python (`?{}:{}` -> if/else, `*n{}` -> for
-   in range, `*?` -> while, `:f(){}` -> def). Forwards common `#`
-   builtins to Python idioms (`#push(L,x)` -> `L.append(x)`,
-   `#has(d,k)` -> `k in d`, etc.). Includes a small Python prelude
-   wrapping subprocess/urllib/json. `emit_py_demo.sra` transpiles
-   `:fact(n){?n<=1{^1} ^n*fact(n-1)}` and runs the result through
-   `python3`, getting `720`.
+4. **emit_js.sra** — Sratch -> JavaScript transpiler ✅
+   Same AST traversal scaffold as emit.sra, different target. Emits
+   a self-contained `.js` file: inline `sr` runtime that bridges
+   Sratch semantics (truthiness, `+`/`*` on strings/lists, negative
+   indexing, `iter()` over numbers/strings/dicts, glob match via
+   RegExp, common `#` tools) followed by the transpiled program.
+   Hoists per-block locals into a single `let`. `emit_js_demo.sra`
+   transpiles `:fact(n){?n<=1{^1} ^n*fact(n-1)}` plus a small extra
+   test program, runs the result through `node`, and prints
+   `720, 1, 4, 9, 16, 10,20,30,40, hello`. Out of scope so far:
+   `@` (LLM) and `~` (agent) — they throw at runtime.
 
 5. **eval.sra** — tree-walking evaluator in Sratch ✅
    Closes the bootstrap. Maintains its own environment as
