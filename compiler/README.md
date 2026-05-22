@@ -26,9 +26,21 @@ Sratch compiler written in Sratch.
 4. **emit_py.sra** — Sratch -> Python transpiler (planned). Same AST
    traversal, different target.
 
-5. **eval.sra** — tree-walking evaluator in Sratch. Closes the loop:
-   `eval(parse(lex(src)))` reproduces the Rust interpreter's behavior.
-   At this point Sratch hosts itself.
+5. **eval.sra** — tree-walking evaluator in Sratch ✅
+   Closes the bootstrap. Maintains its own environment as
+   `ENV={"scopes":[{}],"barriers":[]}` (same shape as the Rust impl,
+   including function barriers). Dispatches AST tags, forwards `#`
+   builtin tool calls to the native interpreter, handles recursion
+   via tagged Flow lists `["N"]`/`["R",v]`/`["K"]`/`["C"]`.
+   `compiler/eval_demo.sra` evaluates four programs end-to-end:
+   `add(3,4)`, `fact(6)`, FizzBuzz 1..6, and list-mutating squares.
+
+## Naming conventions
+
+Compiler internals use a leading `_` to avoid clobbering user code
+that `#inc`s a module: `_prog`, `_stmt`, `_expr`, `_atom`, etc.
+Public entry points stay short: `lex`, `parse`, `emit`, `eval_ast`.
+Sratch has no module/namespace system yet, so this is what you get.
 
 ## Token format
 

@@ -144,6 +144,29 @@ mod tests {
     }
 
     #[test]
+    fn self_hosted_eval_runs_factorial() {
+        // Closes the bootstrap: lex + parse + eval, all in Sratch,
+        // computing fact(6) inside the inner interpreter.
+        // Skips when run from a working directory without the compiler/.
+        if !std::path::Path::new("compiler/eval.sra").exists() {
+            return;
+        }
+        let src = r#"
+#inc("compiler/lex.sra")
+#inc("compiler/parse.sra")
+#inc("compiler/eval.sra")
+toks=[] pi=0
+ENV={"scopes":[{}],"barriers":[]}
+prog=":fact(n){?n<=1{^1} ^n*fact(n-1)}
+^fact(6)"
+ast=parse(lex(prog))
+^eval_ast(ast)
+"#;
+        let out = ev(src).to_str();
+        assert_eq!(out, "720");
+    }
+
+    #[test]
     fn inc_loads_external_module() {
         // Write a temp module that defines a function, include it,
         // call the function.

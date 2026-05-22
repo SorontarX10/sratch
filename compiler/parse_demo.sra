@@ -46,35 +46,35 @@ M2=["==","!=","<=",">=","*?","=~"]
 :expect(typ,val){?!eat(typ,val){>"parse error: expected "+typ+":"+val+" at "+#str(pi)+" got "+#j(peek()) ^F} ^T}
 :skip_nl(){*?atL("o","\n")|atL("o",";"){bump()}}
 
-:parse(t){toks=t pi=0 ^prog()}
+:parse(t){toks=t pi=0 ^_prog()}
 
-:prog(){S=[] skip_nl() *?pi<#len(toks){#push(S,stmt()) skip_nl()} ^S}
+:_prog(){S=[] skip_nl() *?pi<#len(toks){#push(S,_stmt()) skip_nl()} ^S}
 
-:stmt(){
-  ?atL("o",">"){bump() ^[">",expr()]}
-  ?atL("o","^"){bump() ^["^",expr()]}
+:_stmt(){
+  ?atL("o",">"){bump() ^[">",_expr()]}
+  ?atL("o","^"){bump() ^["^",_expr()]}
   ?atL("o","?"){^p_if()}
   ?atL("o","*"){^p_loop(F)}
   ?atL("o","*?"){^p_loop(T)}
   ?atL("o",":"){^p_def()}
-  ?atT("i") & peek2()[0]=="o" & peek2()[1]=="="{n=bump()[1] bump() ^["=",n,expr()]}
+  ?atT("i") & peek2()[0]=="o" & peek2()[1]=="="{n=bump()[1] bump() ^["=",n,_expr()]}
   ?atT("i") & peek()[1]=="brk"{bump() ^["K"]}
   ?atT("i") & peek()[1]=="cnt"{bump() ^["c"]}
-  e=expr()
-  ?atL("o","="){?e[0]=="X"{bump() v=expr() ^["[",e[1],e[2],v]}}
+  e=_expr()
+  ?atL("o","="){?e[0]=="X"{bump() v=_expr() ^["[",e[1],e[2],v]}}
   ^["E",e]
 }
 
-:p_if(){bump() c=expr() th=p_blk() skip_nl() el=N
+:p_if(){bump() c=_expr() th=p_blk() skip_nl() el=N
   ?atL("o",":") & peek2()[0]=="o" & peek2()[1]=="{"{bump() el=p_blk()}
   ^["?",c,th,el]
 }
 :p_loop(isw){bump()
-  ?isw{c=expr() ^["w",c,p_blk()]}
+  ?isw{c=_expr() ^["w",c,p_blk()]}
   ?atT("i") & peek2()[0]=="o" & peek2()[1]==":"{
-    n=bump()[1] bump() it=expr() ^["r",n,it,p_blk()]
+    n=bump()[1] bump() it=_expr() ^["r",n,it,p_blk()]
   }
-  n=expr() ^["*",n,p_blk()]
+  n=_expr() ^["*",n,p_blk()]
 }
 :p_def(){bump() name=bump()[1] expect("o","(")
   params=[]
@@ -86,11 +86,11 @@ M2=["==","!=","<=",">=","*?","=~"]
   ^[":",name,params,p_blk()]
 }
 :p_blk(){expect("o","{") S=[] skip_nl()
-  *?!atL("o","}"){#push(S,stmt()) skip_nl()}
+  *?!atL("o","}"){#push(S,_stmt()) skip_nl()}
   expect("o","}") ^S
 }
 
-:expr(){^p_or()}
+:_expr(){^p_or()}
 :p_or(){l=p_and() *?eat("o","|"){r=p_and() l=["B","|",l,r]} ^l}
 :p_and(){l=p_cmp() *?eat("o","&"){r=p_cmp() l=["B","&",l,r]} ^l}
 :p_cmp(){l=p_add() CO=["==","!=","<",">","<=",">=","=~"]
@@ -104,14 +104,14 @@ M2=["==","!=","<=",">=","*?","=~"]
   ?atL("o","!"){bump() ^["U","!",p_un()]}
   ^p_post()
 }
-:p_post(){e=atom()
+:p_post(){e=_atom()
   *?T{
-    ?atL("o","["){bump() i=expr() expect("o","]") e=["X",e,i] cnt}
+    ?atL("o","["){bump() i=_expr() expect("o","]") e=["X",e,i] cnt}
     ?atL("o","("){
       bump() args=[]
       ?!atL("o",")"){
-        #push(args,expr())
-        *?eat("o",","){#push(args,expr())}
+        #push(args,_expr())
+        *?eat("o",","){#push(args,_expr())}
       }
       expect("o",")") e=["C",e,args] cnt
     }
@@ -120,24 +120,24 @@ M2=["==","!=","<=",">=","*?","=~"]
   }
   ^e
 }
-:atom(){t=bump()
+:_atom(){t=bump()
   ?t[0]=="n"{^["n",#num(t[1])]}
   ?t[0]=="s"{^["s",t[1]]}
   ?t[0]=="i"{^["i",t[1]]}
-  ?t[0]=="o" & t[1]=="("{e=expr() expect("o",")") ^e}
+  ?t[0]=="o" & t[1]=="("{e=_expr() expect("o",")") ^e}
   ?t[0]=="o" & t[1]=="["{
     items=[] skip_nl()
     ?!atL("o","]"){
-      #push(items,expr()) skip_nl()
-      *?eat("o",","){skip_nl() #push(items,expr()) skip_nl()}
+      #push(items,_expr()) skip_nl()
+      *?eat("o",","){skip_nl() #push(items,_expr()) skip_nl()}
     }
     expect("o","]") ^["L",items]
   }
   ?t[0]=="o" & t[1]=="{"{
     pairs=[] skip_nl()
     ?!atL("o","}"){
-      k=expr() expect("o",":") v=expr() #push(pairs,[k,v]) skip_nl()
-      *?eat("o",","){skip_nl() k=expr() expect("o",":") v=expr() #push(pairs,[k,v]) skip_nl()}
+      k=_expr() expect("o",":") v=_expr() #push(pairs,[k,v]) skip_nl()
+      *?eat("o",","){skip_nl() k=_expr() expect("o",":") v=_expr() #push(pairs,[k,v]) skip_nl()}
     }
     expect("o","}") ^["D",pairs]
   }
@@ -145,8 +145,8 @@ M2=["==","!=","<=",">=","*?","=~"]
   ?t[0]=="o" & t[1]=="#"{n=bump()[1] args=[]
     ?eat("o","("){
       ?!atL("o",")"){
-        #push(args,expr())
-        *?eat("o",","){#push(args,expr())}
+        #push(args,_expr())
+        *?eat("o",","){#push(args,_expr())}
       }
       expect("o",")")
     }

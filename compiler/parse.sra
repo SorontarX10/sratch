@@ -31,43 +31,43 @@
 :parse(t){
   toks=t
   pi=0
-  ^prog()
+  ^_prog()
 }
 
-:prog(){
+:_prog(){
   S=[]
   skip_nl()
   *?pi<#len(toks){
-    #push(S,stmt())
+    #push(S,_stmt())
     skip_nl()
   }
   ^S
 }
 
 ' --- statements ---
-:stmt(){
-  ?atL("o",">"){bump() ^[">",expr()]}
-  ?atL("o","^"){bump() ^["^",expr()]}
+:_stmt(){
+  ?atL("o",">"){bump() ^[">",_expr()]}
+  ?atL("o","^"){bump() ^["^",_expr()]}
   ?atL("o","?"){^p_if()}
   ?atL("o","*"){^p_loop(F)}
   ?atL("o","*?"){^p_loop(T)}
   ?atL("o",":"){^p_def()}
   ?atT("i") & peek2()[0]=="o" & peek2()[1]=="="{
     n=bump()[1] bump()
-    ^["=",n,expr()]
+    ^["=",n,_expr()]
   }
   ?atT("i") & peek()[1]=="brk"{bump() ^["K"]}
   ?atT("i") & peek()[1]=="cnt"{bump() ^["c"]}
-  e=expr()
+  e=_expr()
   ?atL("o","="){
-    ?e[0]=="X"{bump() v=expr() ^["[",e[1],e[2],v]}
+    ?e[0]=="X"{bump() v=_expr() ^["[",e[1],e[2],v]}
   }
   ^["E",e]
 }
 
 :p_if(){
   bump()
-  c=expr()
+  c=_expr()
   th=p_blk()
   skip_nl()
   el=N
@@ -80,13 +80,13 @@
 
 :p_loop(isw){
   bump()
-  ?isw{c=expr() ^["w",c,p_blk()]}
+  ?isw{c=_expr() ^["w",c,p_blk()]}
   ?atT("i") & peek2()[0]=="o" & peek2()[1]==":"{
     n=bump()[1] bump()
-    it=expr()
+    it=_expr()
     ^["r",n,it,p_blk()]
   }
-  n=expr()
+  n=_expr()
   ^["*",n,p_blk()]
 }
 
@@ -108,7 +108,7 @@
   S=[]
   skip_nl()
   *?!atL("o","}"){
-    #push(S,stmt())
+    #push(S,_stmt())
     skip_nl()
   }
   expect("o","}")
@@ -116,7 +116,7 @@
 }
 
 ' --- expressions: Pratt-style precedence climb ---
-:expr(){^p_or()}
+:_expr(){^p_or()}
 
 :p_or(){
   l=p_and()
@@ -164,15 +164,15 @@
 }
 
 :p_post(){
-  e=atom()
+  e=_atom()
   *?T{
-    ?atL("o","["){bump() i=expr() expect("o","]") e=["X",e,i] cnt}
+    ?atL("o","["){bump() i=_expr() expect("o","]") e=["X",e,i] cnt}
     ?atL("o","("){
       bump()
       args=[]
       ?!atL("o",")"){
-        #push(args,expr())
-        *?eat("o",","){#push(args,expr())}
+        #push(args,_expr())
+        *?eat("o",","){#push(args,_expr())}
       }
       expect("o",")")
       e=["C",e,args]
@@ -189,17 +189,17 @@
   ^e
 }
 
-:atom(){
+:_atom(){
   t=bump()
   ?t[0]=="n"{^["n",#num(t[1])]}
   ?t[0]=="s"{^["s",t[1]]}
   ?t[0]=="i"{^["i",t[1]]}
-  ?t[0]=="o" & t[1]=="("{e=expr() expect("o",")") ^e}
+  ?t[0]=="o" & t[1]=="("{e=_expr() expect("o",")") ^e}
   ?t[0]=="o" & t[1]=="["{
     items=[] skip_nl()
     ?!atL("o","]"){
-      #push(items,expr()) skip_nl()
-      *?eat("o",","){skip_nl() #push(items,expr()) skip_nl()}
+      #push(items,_expr()) skip_nl()
+      *?eat("o",","){skip_nl() #push(items,_expr()) skip_nl()}
     }
     expect("o","]")
     ^["L",items]
@@ -207,10 +207,10 @@
   ?t[0]=="o" & t[1]=="{"{
     pairs=[] skip_nl()
     ?!atL("o","}"){
-      k=expr() expect("o",":") v=expr()
+      k=_expr() expect("o",":") v=_expr()
       #push(pairs,[k,v]) skip_nl()
       *?eat("o",","){
-        skip_nl() k=expr() expect("o",":") v=expr()
+        skip_nl() k=_expr() expect("o",":") v=_expr()
         #push(pairs,[k,v]) skip_nl()
       }
     }
@@ -228,8 +228,8 @@
     args=[]
     ?eat("o","("){
       ?!atL("o",")"){
-        #push(args,expr())
-        *?eat("o",","){#push(args,expr())}
+        #push(args,_expr())
+        *?eat("o",","){#push(args,_expr())}
       }
       expect("o",")")
     }
