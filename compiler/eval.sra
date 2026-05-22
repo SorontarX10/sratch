@@ -1,13 +1,16 @@
 ' eval.sra — tree-walking interpreter in Sratch. Bootstrap step 4.
 ' Closes the loop: eval_ast(parse(lex(src))) matches native semantics.
 '
-' Caller must initialize the global environment before calling:
-'   ENV={"scopes":[{}],"barriers":[]}
+' ENV is a module-global. When loaded via #inc(path,"E") it is
+' mangled to E_ENV and helper-internal references rewrite to match.
+'
 ' Flow is a tagged list:
 '   ["N"]       normal completion
 '   ["R", v]    return v from the current function
 '   ["K"]       break
 '   ["C"]       continue
+
+ENV={"scopes":[{}],"barriers":[]}
 
 ' --- env management ---
 :env_push(){#push(ENV.scopes,{})}

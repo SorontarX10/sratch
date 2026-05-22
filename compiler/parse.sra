@@ -13,11 +13,15 @@
 '               [:,name,params,b]  [K]  [c]  [E,e]
 
 ' --- token-stream cursor ---
-' Parser state must be declared at top level so that helper functions
-' (peek, bump, ...) can mutate it across the function-barrier scope
-' rule. Initialize before calling parse().
-'   toks=[] pi=0
-'
+' State is declared at the module top so that helper functions
+' (peek, bump, ...) can mutate it across the function-barrier scope.
+' When loaded via #inc(path,"P"), these names get mangled to P_toks /
+' P_pi and live as module-globals — peek/bump references rewrite to
+' match. When loaded without a prefix they remain plain globals,
+' overwriting any prior toks/pi the caller may have set.
+toks=[]
+pi=0
+
 :peek(){?pi>=#len(toks){^["e",""]} ^toks[pi]}
 :peek2(){?pi+1>=#len(toks){^["e",""]} ^toks[pi+1]}
 :bump(){t=toks[pi] pi=pi+1 ^t}

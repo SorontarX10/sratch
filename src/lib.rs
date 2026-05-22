@@ -203,6 +203,23 @@ ast=parse(lex(prog))
     }
 
     #[test]
+    fn inc_with_prefix_namespaces_module() {
+        // Module-local state (counter) plus a mutating helper that
+        // updates it across calls. The prefix mangles both the
+        // top-level defs AND every reference to them, so M.tick()
+        // and the internal `counter=counter+1` use the same binding.
+        let tmp = std::env::temp_dir().join("sratch_ns_test.sra");
+        std::fs::write(&tmp, "counter=0\n:tick(){counter=counter+1 ^counter}\n").unwrap();
+        let src = format!(
+            "#inc(\"{}\",\"M\")\nM.tick()\nM.tick()\n^M.tick()",
+            tmp.display()
+        );
+        let out = ev(&src).to_str();
+        std::fs::remove_file(&tmp).ok();
+        assert_eq!(out, "3");
+    }
+
+    #[test]
     fn inc_loads_external_module() {
         // Write a temp module that defines a function, include it,
         // call the function.

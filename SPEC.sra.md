@@ -61,7 +61,11 @@ fs:     rd(p)  wr(p,s)
 sys:    sh(cmd)  get(url)  post(url,body)
 json:   j(v)        encode
         uj(s)       decode
-mod:    inc(path)   read+parse+eval another .sra in current scope
+mod:    inc(path)         read+parse+eval another .sra in current scope
+        inc(path, "P")    same, but mangle every top-level def/assign
+                          with "P_" prefix and expose them as a dict P,
+                          so `P.foo(args)` works and internal helpers
+                          keep resolving to the renamed versions
 ```
 
 ## providers

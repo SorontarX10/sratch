@@ -42,12 +42,28 @@ Sratch compiler written in Sratch.
    `compiler/eval_demo.sra` evaluates four programs end-to-end:
    `add(3,4)`, `fact(6)`, FizzBuzz 1..6, and list-mutating squares.
 
-## Naming conventions
+## Modules
 
-Compiler internals use a leading `_` to avoid clobbering user code
-that `#inc`s a module: `_prog`, `_stmt`, `_expr`, `_atom`, etc.
-Public entry points stay short: `lex`, `parse`, `emit`, `eval_ast`.
-Sratch has no module/namespace system yet, so this is what you get.
+Two ways to load a compiler module:
+
+```
+#inc("compiler/parse.sra")        ' defs land as plain globals
+#inc("compiler/parse.sra", "P")   ' defs mangled to P_*, plus P dict
+```
+
+With a prefix, `#inc` collects every top-level def/assign name and
+rewrites that name plus every reference to it (anywhere in the file)
+to `P_name`. After eval, it builds a dict `P = {name: P_name, ...}`
+so callers can write `P.parse(tks)` without remembering the mangled
+form. Module-internal state (`toks`, `pi`, `ENV`) is declared at the
+top of the file so it gets mangled too — that's what makes
+helper functions (`peek`, `bump`) able to mutate it across calls
+under function-barrier scoping.
+
+Internal helpers still start with `_` (`_prog`, `_stmt`, `_expr`,
+`_atom`) — that convention covers the no-prefix case where defs land
+in the plain global namespace. With a prefix you don't strictly need
+the underscores, but the names stay short.
 
 ## Token format
 
