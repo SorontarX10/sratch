@@ -23,7 +23,20 @@ Sratch compiler written in Sratch.
    == parse(src). `compiler/emit_demo.sra` runs the full round trip
    and prints "ROUND-TRIP OK".
 
-4. **emit_js.sra** — Sratch -> JavaScript transpiler ✅
+4. **emit_py.sra / emit_js.sra** — multi-target transpilers ✅
+   Same AST traversal pattern, one file per target language.
+   `polyglot_demo.sra` compiles a single Sratch source to BOTH JS
+   (`node`) and Python (`python3`) and confirms identical output.
+   Token economy on the demo program:
+   - Sratch source: 74 tokens / 99 chars
+   - Python output: 286 tokens / 634 chars
+   - JS output:    2012 tokens / 3263 chars (heavier inline runtime)
+
+   Adding a new target = one file exposing `<lang>_emit(ast)`. The
+   per-target file owns its inline runtime + per-AST-tag dispatch;
+   no shared framework needed.
+
+4a. **emit_js.sra** — Sratch -> JavaScript transpiler ✅
    Same AST traversal scaffold as emit.sra, different target. Emits
    a self-contained `.js` file: inline `sr` runtime that bridges
    Sratch semantics (truthiness, `+`/`*` on strings/lists, negative

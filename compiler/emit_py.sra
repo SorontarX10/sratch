@@ -86,7 +86,7 @@ _PYESC={"\"":"\\\"","\\":"\\\\","\n":"\\n","\t":"\\t","\r":"\\r"}
   ?name=="pop"{^a0+".pop()"}
   ?name=="has"{^"("+a1+" in "+a0+")"}
   ?name=="split"{^a0+".split("+a1+")"}
-  ?name=="join"{^a1+".join("+a0+")"}
+  ?name=="join"{^a1+".join(str(x) for x in "+a0+")"}
   ?name=="up"{^a0+".upper()"}
   ?name=="lo"{^a0+".lower()"}
   ?name=="trim"{^a0+".strip()"}
