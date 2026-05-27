@@ -48,7 +48,7 @@ M2=["==","!=","<=",">=","*?","=~"]
 
 :parse(t){toks=t pi=0 ^_prog()}
 
-:_prog(){S=[] skip_nl() *?pi<#len(toks){#push(S,_stmt()) skip_nl()} ^S}
+:_prog(){_S=[] skip_nl() *?pi<#len(toks){#push(_S,_stmt()) skip_nl()} ^_S}
 
 :_stmt(){
   ?atL("o",">"){bump() ^[">",_expr()]}
@@ -85,9 +85,9 @@ M2=["==","!=","<=",">=","*?","=~"]
   expect("o",")")
   ^[":",name,params,p_blk()]
 }
-:p_blk(){expect("o","{") S=[] skip_nl()
-  *?!atL("o","}"){#push(S,_stmt()) skip_nl()}
-  expect("o","}") ^S
+:p_blk(){expect("o","{") _S=[] skip_nl()
+  *?!atL("o","}"){#push(_S,_stmt()) skip_nl()}
+  expect("o","}") ^_S
 }
 
 :_expr(){^p_or()}

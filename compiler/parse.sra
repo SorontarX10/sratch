@@ -39,13 +39,13 @@ pi=0
 }
 
 :_prog(){
-  S=[]
+  _S=[]
   skip_nl()
   *?pi<#len(toks){
-    #push(S,_stmt())
+    #push(_S,_stmt())
     skip_nl()
   }
-  ^S
+  ^_S
 }
 
 ' --- statements ---
@@ -109,14 +109,14 @@ pi=0
 
 :p_blk(){
   expect("o","{")
-  S=[]
+  _S=[]
   skip_nl()
   *?!atL("o","}"){
-    #push(S,_stmt())
+    #push(_S,_stmt())
     skip_nl()
   }
   expect("o","}")
-  ^S
+  ^_S
 }
 
 ' --- expressions: Pratt-style precedence climb ---

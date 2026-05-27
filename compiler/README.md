@@ -23,20 +23,27 @@ Sratch compiler written in Sratch.
    == parse(src). `compiler/emit_demo.sra` runs the full round trip
    and prints "ROUND-TRIP OK".
 
-4. **emit_py.sra / emit_js.sra** — multi-target transpilers ✅
-   Same AST traversal pattern, one file per target language.
-   `polyglot_demo.sra` compiles a single Sratch source to BOTH JS
-   (`node`) and Python (`python3`) and confirms identical output.
-   Token economy on the demo program:
-   - Sratch source: 74 tokens / 99 chars
-   - Python output: 286 tokens / 634 chars
-   - JS output:    2012 tokens / 3263 chars (heavier inline runtime)
+4. **emit_{js,py,sh,html}.sra** — multi-target transpilers ✅
+   Same AST traversal pattern, one file per target. `quad_demo.sra`
+   compiles ONE Sratch source to four targets and runs the three
+   runnables (JS via `node`, Python via `python3`, Bash via `bash`)
+   to confirm identical output. HTML wraps the JS in a self-contained
+   page with `console.log` redirected to a `<pre>`.
+
+   Token economy on the demo program (recursive fact + list ops):
+   - Sratch source:   67 tok /   87 chars (1.0×)
+   - Python output:  279 tok /  621 chars (4.2×)
+   - Bash output:   1195 tok / 2139 chars (17.8×, scalar-only subset)
+   - JS output:     2000 tok / 3242 chars (29.9×, hefty inline runtime)
+   - HTML output:   2498 tok / 4236 chars (37.3×, JS + DOM wrapper)
 
    Adding a new target = one file exposing `<lang>_emit(ast)`. The
    per-target file owns its inline runtime + per-AST-tag dispatch;
    no shared framework needed.
 
-4a. **emit_js.sra** — Sratch -> JavaScript transpiler ✅
+### Per-target notes
+
+- **emit_js.sra** — JavaScript with inline `sr` runtime.
    Same AST traversal scaffold as emit.sra, different target. Emits
    a self-contained `.js` file: inline `sr` runtime that bridges
    Sratch semantics (truthiness, `+`/`*` on strings/lists, negative
@@ -47,6 +54,21 @@ Sratch compiler written in Sratch.
    test program, runs the result through `node`, and prints
    `720, 1, 4, 9, 16, 10,20,30,40, hello`. Out of scope so far:
    `@` (LLM) and `~` (agent) — they throw at runtime.
+
+- **emit_py.sra** — Python target. Maps Sratch sigils to native
+  idioms (`#push(L,x)` -> `L.append(x)`, `#has(d,k)` -> `k in d`).
+  Compact runtime (no inline `sr` object, just module-level helpers).
+
+- **emit_sh.sra** — Bash, restricted subset. Scalars, lists as
+  space-separated strings (no nesting/dicts), arithmetic, control
+  flow, functions with single return via stdout capture. Tools:
+  `p in sh len str num push join split has rng`. `@`/`~`/dicts
+  unsupported. List literal `[1,2,3]` becomes `"1 2 3"`; for-in
+  splats unquoted to force word splitting.
+
+- **emit_html.sra** — wraps `emit_js` output in a self-contained
+  `.html` page with `console.log` redirected to a `<pre>`. Open the
+  file in a browser, output renders in the page.
 
 5. **eval.sra** — tree-walking evaluator in Sratch ✅
    Closes the bootstrap. Maintains its own environment as
