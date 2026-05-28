@@ -367,6 +367,31 @@ code=E.{emit_fn}(P.parse(L.lex(src)))
     }
 
     #[test]
+    fn c_transpile() {
+        if !std::path::Path::new("compiler/emit_c.sra").exists() { return; }
+        if std::process::Command::new("gcc").arg("--version").output().is_err() { return; }
+        let cf = std::env::temp_dir().join("sratch_t.c");
+        let bin = std::env::temp_dir().join("sratch_t_cbin");
+        let d = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("compiler/emit_c.sra","C")
+src=":fact(n){{?n<=1{{^1}} ^n*fact(n-1)}}
+>fact(6)
+M=[1,2,3]
+#push(M,4)
+>#join(M,\",\")"
+code=C.c_emit(P.parse(L.lex(src)))
+#wr("{cf}",code)
+^#sh("gcc -w {cf} -o {bin} 2>&1 && {bin}")
+"#, cf = cf.display(), bin = bin.display());
+        let o = ev(&d).to_str();
+        std::fs::remove_file(&cf).ok();
+        std::fs::remove_file(&bin).ok();
+        assert!(o.contains("720") && o.contains("1,2,3,4"), "c: {}", o);
+    }
+
+    #[test]
     fn bash_dict_via_assoc_array() {
         if !std::path::Path::new("compiler/emit_sh.sra").exists() { return; }
         let out_sh = std::env::temp_dir().join("sratch_dict.sh");
