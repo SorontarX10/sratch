@@ -266,6 +266,44 @@ js=J.emit_js(P.parse(L.lex(">42")))
         assert!(out.contains("</script></body></html>"), "expected proper close");
     }
 
+    fn transpile_run(emit_fn: &str, ext: &str, runner: &str) -> Option<String> {
+        let module = format!("compiler/emit_{}.sra", ext);
+        if !std::path::Path::new(&module).exists() { return None; }
+        let bin = runner.split_whitespace().next().unwrap();
+        if std::process::Command::new(bin).arg("--version").output().is_err() { return None; }
+        let out_file = std::env::temp_dir().join(format!("sratch_t.{}", ext));
+        let driver = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("{module}","E")
+src=":fact(n){{?n<=1{{^1}} ^n*fact(n-1)}}
+>fact(6)
+M=[1,2,3]
+#push(M,4)
+>#join(M,\",\")"
+code=E.{emit_fn}(P.parse(L.lex(src)))
+#wr("{out}",code)
+^#sh("{runner} {out} 2>&1")
+"#, module = module, emit_fn = emit_fn, out = out_file.display(), runner = runner);
+        let r = ev(&driver).to_str();
+        std::fs::remove_file(&out_file).ok();
+        Some(r)
+    }
+
+    #[test]
+    fn ruby_transpile() {
+        if let Some(out) = transpile_run("rb_emit", "rb", "ruby") {
+            assert!(out.contains("720") && out.contains("1,2,3,4"), "ruby: {}", out);
+        }
+    }
+
+    #[test]
+    fn go_transpile() {
+        if let Some(out) = transpile_run("go_emit", "go", "go run") {
+            assert!(out.contains("720") && out.contains("1,2,3,4"), "go: {}", out);
+        }
+    }
+
     #[test]
     fn js_llm_bridge_stub_and_agent() {
         if !std::path::Path::new("compiler/emit_js.sra").exists() { return; }
