@@ -40,13 +40,16 @@ Source files use the `.sra` extension.
 | `*x:e{...}`            | for-in over list/str/dict/number       |
 | `*?c{...}`             | while                                  |
 | `:f(a,b){^a+b}`        | define function                        |
+| `:(a,b){^a+b}`         | lambda (anonymous closure)             |
 | `@"prompt"`            | call LLM, returns string               |
 | `@p %"claude-opus-4-7"`| call Claude with explicit model        |
 | `@p %"gpt-4o"`         | call OpenAI (provider chosen by name)  |
 | `~e`                   | run ReAct loop, return final `DONE:`   |
+| `#use(p,tools)`        | native tool-use (tools={n:lambda})     |
 | `@[u,a,u]`             | multi-turn (alternating user/assistant)|
 | `s=~"\D*"`             | glob match, returns capture or nil     |
 | `#tk(s)`               | approximate BPE token count            |
+| `#inc("m.sra","M")`    | load module under namespace `M`        |
 | `#sh("ls -la")`        | run shell, returns stdout              |
 | `#get("https://...")`  | HTTP GET                               |
 | `"\R \D \S \G \O \E"`  | agent-vocab string escapes (lex-time)  |
@@ -80,8 +83,27 @@ non-shell agents, write the explicit form (`examples/agent.sra`).
 Override defaults with `SRATCH_MODEL`. Override base URLs with
 `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL`. Without a key, the call
 returns a deterministic stub so programs stay runnable offline.
+`SRATCH_CACHE=1` adds Anthropic prompt-cache markers; `SRATCH_STREAM=1`
+prints tokens as they arrive; `SRATCH_MOCK` injects scripted replies
+for deterministic agent-loop tests.
+
+## CLI
+
+```
+sratch file.sra        run a program
+sratch -e '<code>'     run inline
+sratch --fmt file.sra  print canonical formatting
+sratch --repl          interactive read-eval-print loop
+```
+
+## Self-hosting & transpilers
+
+`compiler/` is a Sratch compiler written in Sratch (lex → parse →
+emit/eval). It transpiles one Sratch source to **JavaScript, Python,
+Bash, Ruby, Go, C, and HTML** — see `compiler/all_targets_demo.sra`,
+which runs every backend and confirms identical output.
 
 ## Status
 
 Tree-walking interpreter in Rust, no third-party crates. LLM/HTTP calls
-shell out to `curl`.
+shell out to `curl`. 42 tests.

@@ -104,6 +104,20 @@ mod tests {
     }
 
     #[test]
+    fn syntax_highlighter_spans() {
+        if !std::path::Path::new("compiler/highlight.sra").exists() { return; }
+        let d = r#"
+#inc("compiler/highlight.sra","H")
+^H.hl(":sq(n){^n*42} 'c\n>sq(3)")
+"#;
+        let out = ev(d).to_str();
+        assert!(out.contains("class=\"nu\">42"), "number span: {out}");
+        assert!(out.contains("class=\"cm\">"), "comment span: {out}");
+        assert!(out.contains("class=\"op\">&gt;"), "escaped op span: {out}");
+        assert!(out.contains("<pre class=\"sratch\">"));
+    }
+
+    #[test]
     fn prelude_constants_not_clobberable_from_functions() {
         // T/F/N resolve as evaluator constants, so a function-local named
         // `T` creates a local and cannot corrupt the global `true`.

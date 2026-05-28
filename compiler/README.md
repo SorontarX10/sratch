@@ -9,7 +9,8 @@ Sratch compiler written in Sratch.
 Roadmap + tech-debt: complete. Language: lambdas/closures (`:(x){...}`),
 native tool-use (`#use`), `@`/`~` LLM+ReAct (Anthropic/OpenAI routing,
 prompt caching, streaming), function-barrier scoping, modules
-(`#inc(path,"P")`). Tooling: `--fmt`, `--repl`. Transpile targets:
+(`#inc(path,"P")`). Tooling: `--fmt`, `--repl`, `highlight.sra` (syntax highlighting).
+Transpile targets:
 **js, py, sh, html, rb, go, c** — each verified end-to-end by running
 the output. Greedy-`*` parse ambiguity fixed. 39 tests green.
 
