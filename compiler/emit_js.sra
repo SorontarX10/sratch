@@ -23,6 +23,10 @@ idx(v,i){if(Array.isArray(v)||typeof v==='string'){const n=v.length,k=i<0?n+i:i;
 aset(v,i,x){if(Array.isArray(v)){const n=v.length,k=i<0?n+i:i;if(k>=0&&k<n)v[k]=x;}else if(v&&typeof v==='object'){v[i]=x;}return v;},
 iter(v){if(typeof v==='number'){const r=[];for(let i=0;i<v;i++)r.push(i);return r;}if(typeof v==='string')return [...v];if(Array.isArray(v))return v;if(v&&typeof v==='object')return Object.keys(v);return [];},
 glob(s,p){let re='',cap=false;for(const c of String(p)){if(c==='*'){re+='([\\\\s\\\\S]*)';cap=true;}else if(c==='?'){re+='[\\\\s\\\\S]';}else{re+=c.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&');}}const m=String(s).match(new RegExp(re));if(!m)return null;return cap?m[1]:m[0];},
+_mi:0,
+sh(cmd){return require('child_process').execSync(cmd,{shell:'/bin/bash'}).toString().replace(/\\n$/,'');},
+llm(p,m){m=m||process.env.SRATCH_MODEL||'claude-haiku-4-5';const mk=process.env.SRATCH_MOCK;if(mk!==undefined){const parts=mk.split('\\n---\\n');const r=parts[sr._mi%parts.length];sr._mi++;return r;}const isO=/^(gpt-|o1|o3|o4|chatgpt|text-)/.test(m);const key=isO?process.env.OPENAI_API_KEY:process.env.ANTHROPIC_API_KEY;if(!key)return '[stub:'+m+'] '+p;const cp=require('child_process');let url,hdr,body;if(isO){url=(process.env.OPENAI_BASE_URL||'https://api.openai.com')+'/v1/chat/completions';hdr=['-H','authorization: Bearer '+key];body=JSON.stringify({model:m,messages:[{role:'user',content:p}]});}else{url=(process.env.ANTHROPIC_BASE_URL||'https://api.anthropic.com')+'/v1/messages';hdr=['-H','x-api-key: '+key,'-H','anthropic-version: 2023-06-01'];body=JSON.stringify({model:m,max_tokens:1024,messages:[{role:'user',content:p}]});}const args=['-sS','-X','POST',url,'-H','content-type: application/json',...hdr,'-d','@-'];const out=cp.execFileSync('curl',args,{input:body}).toString();try{const j=JSON.parse(out);return isO?j.choices[0].message.content:j.content[0].text;}catch(e){return out;}},
+agent(h){const max=parseInt(process.env.SRATCH_AGENT_MAX||'20');let out='';for(let i=0;i<max;i++){const r=sr.llm(String(h));if(r.includes('DONE:'))return r;const j=r.indexOf('SH:');if(j>=0){const o=sr.sh(r.slice(j+3).trim());h=String(h)+'\\nO:'+o;}else{h=String(h)+'\\nE';}out=r;}return out;},
 tools:{
 p:(...a)=>sr.print(...a),
 len:v=>Array.isArray(v)||typeof v==='string'?v.length:(v?Object.keys(v).length:0),
@@ -41,6 +45,9 @@ vals:d=>Object.values(d||{}),
 rng:(a,b)=>{const lo=b===undefined?0:a,hi=b===undefined?a:b,r=[];for(let i=lo;i<hi;i++)r.push(i);return r;},
 j:v=>JSON.stringify(v),
 uj:s=>JSON.parse(s),
+sh:cmd=>sr.sh(cmd),
+get:url=>require('child_process').execFileSync('curl',['-sSL',url]).toString(),
+in:()=>{try{const fs=require('fs');const b=fs.readFileSync(0,'utf8');return b.replace(/\\n$/,'');}catch(e){return '';}},
 tk:s=>{let n=0,i=0;const b=String(s);while(i<b.length){const c=b[i];if(/\\s/.test(c)){i++;continue;}if(/[A-Za-z0-9_]/.test(c)){const start=i;while(i<b.length&&/[A-Za-z0-9_]/.test(b[i]))i++;n+=Math.ceil((i-start)/4);}else{n++;i++;}}return Math.max(1,n);}
 }};
 "
@@ -119,8 +126,12 @@ tk:s=>{let n=0,i=0;const b=String(s);while(i<b.length){const c=b[i];if(/\\s/.tes
     *a:e[2]{#push(parts,_js_e(a))}
     ^"sr.tools."+e[1]+"("+#join(parts,",")+")"
   }
-  ?k=="@"{^"(()=>{throw new Error('@ LLM not supported in JS emit')})()"}
-  ?k=="~"{^"(()=>{throw new Error('~ agent not supported in JS emit')})()"}
+  ?k=="@"{
+    p=_js_e(e[1])
+    ?e[2]!=N{^"sr.llm("+p+","+_js_e(e[2])+")"}
+    ^"sr.llm("+p+")"
+  }
+  ?k=="~"{^"sr.agent("+_js_e(e[1])+")"}
   ^"null"
 }
 

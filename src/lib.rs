@@ -31,6 +31,17 @@ mod tests {
     }
 
     #[test]
+    fn star_loop_vs_multiply_disambiguation() {
+        // `*` is multiply inside an expression, but a `*expr{...}` loop
+        // on the same line after another statement must parse as a loop.
+        // Multiply still works, including inside an if-condition.
+        assert_eq!(ev(":f(d){r=\"\" *d{r=r+\"x\"} ^r}\n^f(3)").to_str(), "xxx");
+        assert_eq!(ev("^2*3").to_str(), "6");
+        assert_eq!(ev("?2*3>5{^\"y\"}:{^\"n\"}").to_str(), "y");
+        assert_eq!(ev("a=2 *3{a=a+1}\n^a").to_str(), "5");
+    }
+
+    #[test]
     fn if_else() {
         let out = ev("a=5\n?a>3{^\"b\"}:{^\"s\"}").to_str();
         assert_eq!(out, "b");
@@ -238,6 +249,54 @@ js=J.emit_js(P.parse(L.lex(">42")))
         assert!(out.starts_with("<!DOCTYPE html>"), "expected HTML doctype");
         assert!(out.contains("sr.print(42)"), "expected JS body inline");
         assert!(out.contains("</script></body></html>"), "expected proper close");
+    }
+
+    #[test]
+    fn js_llm_bridge_stub_and_agent() {
+        if !std::path::Path::new("compiler/emit_js.sra").exists() { return; }
+        if std::process::Command::new("node").arg("--version").output().is_err() { return; }
+        let out_js = std::env::temp_dir().join("sratch_jsllm.js");
+        // @ stub path (no API key) + provider routing
+        let d1 = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("compiler/emit_js.sra","J")
+js=J.emit_js(P.parse(L.lex(">@\"hi\" %\"gpt-4o\"")))
+#wr("{out}",js)
+^#sh("node {out}")
+"#, out = out_js.display());
+        let o1 = ev(&d1).to_str();
+        assert!(o1.contains("stub:gpt-4o") && o1.contains("hi"), "js @ stub: {}", o1);
+        // ~ agent loop driven by SRATCH_MOCK
+        let d2 = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("compiler/emit_js.sra","J")
+js=J.emit_js(P.parse(L.lex(">~\"go\"")))
+#wr("{out}",js)
+^#sh("SRATCH_MOCK=$(printf 'SH:echo hi\n---\nDONE:ok') node {out}")
+"#, out = out_js.display());
+        let o2 = ev(&d2).to_str();
+        std::fs::remove_file(&out_js).ok();
+        assert!(o2.contains("DONE:ok"), "js ~ agent: {}", o2);
+    }
+
+    #[test]
+    fn py_llm_bridge_stub() {
+        if !std::path::Path::new("compiler/emit_py.sra").exists() { return; }
+        if std::process::Command::new("python3").arg("--version").output().is_err() { return; }
+        let out_py = std::env::temp_dir().join("sratch_pyllm.py");
+        let d = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("compiler/emit_py.sra","Y")
+py=Y.py_emit(P.parse(L.lex(">@\"hi\"")))
+#wr("{out}",py)
+^#sh("python3 {out}")
+"#, out = out_py.display());
+        let o = ev(&d).to_str();
+        std::fs::remove_file(&out_py).ok();
+        assert!(o.contains("stub:claude-haiku-4-5") && o.contains("hi"), "py @ stub: {}", o);
     }
 
     #[test]

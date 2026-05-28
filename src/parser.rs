@@ -4,10 +4,15 @@ use crate::lexer::Tok;
 pub struct Parser {
     toks: Vec<Tok>,
     pos: usize,
+    /// True while parsing an if/while/loop header expression, where a
+    /// following `{` is the block — so `*` must stay multiplication.
+    /// Elsewhere `*` is disambiguated against the `*expr{...}` loop form
+    /// by lookahead (see parse_mul).
+    block_ctx: bool,
 }
 
 impl Parser {
-    pub fn new(toks: Vec<Tok>) -> Self { Self { toks, pos: 0 } }
+    pub fn new(toks: Vec<Tok>) -> Self { Self { toks, pos: 0, block_ctx: false } }
 
     fn peek(&self) -> &Tok { &self.toks[self.pos] }
     fn peek2(&self) -> &Tok { self.toks.get(self.pos + 1).unwrap_or(&Tok::Eof) }
@@ -75,9 +80,20 @@ impl Parser {
         }
     }
 
+    /// Parse a header expression where a `{` block legitimately follows
+    /// (if/while/loop conditions). Suppresses the `*` loop-disambiguation
+    /// so `*` stays multiplication.
+    fn header_expr(&mut self) -> Result<Expr, String> {
+        let save = self.block_ctx;
+        self.block_ctx = true;
+        let e = self.expr();
+        self.block_ctx = save;
+        e
+    }
+
     fn parse_if(&mut self) -> Result<Stmt, String> {
         self.bump();
-        let c = self.expr()?;
+        let c = self.header_expr()?;
         let t = self.block()?;
         self.skip_nl();
         let e = if matches!(self.peek(), Tok::Colon) && matches!(self.peek2(), Tok::LBr) {
@@ -90,18 +106,18 @@ impl Parser {
     fn parse_loop(&mut self, is_while: bool) -> Result<Stmt, String> {
         self.bump();
         if is_while {
-            let c = self.expr()?;
+            let c = self.header_expr()?;
             let b = self.block()?;
             return Ok(Stmt::While(c, b));
         }
         // *n{..}  or  *x:expr{..}
         if let (Tok::Ident(n), Tok::Colon) = (self.peek().clone(), self.peek2().clone()) {
             self.bump(); self.bump();
-            let it = self.expr()?;
+            let it = self.header_expr()?;
             let b = self.block()?;
             return Ok(Stmt::For(n, it, b));
         }
-        let n = self.expr()?;
+        let n = self.header_expr()?;
         let b = self.block()?;
         Ok(Stmt::Repeat(n, b))
     }
@@ -176,6 +192,21 @@ impl Parser {
                 Tok::Star => BinOp::Mul, Tok::Slash => BinOp::Div, Tok::Percent => BinOp::Mod,
                 _ => break,
             };
+            // Disambiguate `a*b` (multiply) from `a` followed by a new
+            // `*expr{...}` loop statement. Only outside header context:
+            // tentatively parse the RHS; if a block `{` immediately
+            // follows, this was a loop — backtrack and end the expression.
+            if op == BinOp::Mul && !self.block_ctx {
+                let save = self.pos;
+                self.bump();
+                let r = self.parse_unary()?;
+                if matches!(self.peek(), Tok::LBr) {
+                    self.pos = save;
+                    break;
+                }
+                l = Expr::Bin(op, Box::new(l), Box::new(r));
+                continue;
+            }
             self.bump();
             let r = self.parse_unary()?;
             l = Expr::Bin(op, Box::new(l), Box::new(r));
