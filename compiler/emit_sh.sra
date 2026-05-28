@@ -97,6 +97,11 @@ _SHESC={"\"":"\\\"","\\":"\\\\","$":"\\$","`":"\\`"}
     ^inner
   }
   ?k=="X"{^"\"$(sr_idx "+_sh_e(e[1])+" "+_sh_e(e[2])+")\""}
+  ?k=="F"{
+    ' Dict field read: base must be a bare assoc-array variable.
+    ?e[1][0]=="i"{^"\"${"+e[1][1]+"["+e[2]+"]}\""}
+    ^"\"\""
+  }
   ?k=="C"{
     P=[]
     *a:e[2]{#push(P,_sh_e(a))}
@@ -107,7 +112,7 @@ _SHESC={"\"":"\\\"","\\":"\\\\","$":"\\$","`":"\\`"}
     *a:e[2]{#push(P,_sh_e(a))}
     ^"\"$(sr_"+e[1]+" "+#join(P," ")+")\""
   }
-  ?k=="@"|k=="~"|k=="F"|k=="D"{^"\"# unsupported "+k+"\""}
+  ?k=="@"|k=="~"|k=="D"{^"\"# unsupported "+k+"\""}
   ^"\"\""
 }
 
@@ -140,7 +145,16 @@ _SHESC={"\"":"\\\"","\\":"\\\\","$":"\\$","`":"\\`"}
 :_sh_s(s,d){
   k=s[0]
   i=_sh_ind(d)
-  ?k=="="{^i+s[1]+"="+_sh_e(s[2])}
+  ?k=="="{
+    ' Dict literal -> bash associative array (declare -A). Limited:
+    ' string keys only, no nesting, accessed via .field (the F node).
+    ?s[2][0]=="D"{
+      P=[]
+      *pr:s[2][1]{#push(P,"["+_sh_e(pr[0])+"]="+_sh_e(pr[1]))}
+      ^i+"declare -A "+s[1]+"=("+#join(P," ")+")"
+    }
+    ^i+s[1]+"="+_sh_e(s[2])
+  }
   ?k==">"{^i+"echo "+_sh_e(s[1])}
   ?k=="^"{^i+"printf '%s' "+_sh_e(s[1])+"; return 0"}
   ?k=="?"{

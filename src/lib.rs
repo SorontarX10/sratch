@@ -81,6 +81,16 @@ mod tests {
     }
 
     #[test]
+    fn sse_delta_parsing() {
+        // Anthropic streaming deltas yield incremental text; other events don't.
+        let d = r#"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}"#;
+        assert_eq!(llm::sse_text_delta(d), Some("Hel".to_string()));
+        let stop = r#"data: {"type":"message_stop"}"#;
+        assert_eq!(llm::sse_text_delta(stop), None);
+        assert_eq!(llm::sse_text_delta("event: ping"), None);
+    }
+
+    #[test]
     fn prompt_cache_marker() {
         use value::Val;
         use std::rc::Rc;
@@ -354,6 +364,26 @@ code=E.{emit_fn}(P.parse(L.lex(src)))
         if let Some(out) = transpile_run("go_emit", "go", "go run") {
             assert!(out.contains("720") && out.contains("1,2,3,4"), "go: {}", out);
         }
+    }
+
+    #[test]
+    fn bash_dict_via_assoc_array() {
+        if !std::path::Path::new("compiler/emit_sh.sra").exists() { return; }
+        let out_sh = std::env::temp_dir().join("sratch_dict.sh");
+        let d = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("compiler/emit_sh.sra","S")
+src="d={{\"name\":\"sratch\",\"ver\":3}}
+>d.name
+>d.ver"
+sh=S.emit_sh(P.parse(L.lex(src)))
+#wr("{out}",sh)
+^#sh("bash {out}")
+"#, out = out_sh.display());
+        let o = ev(&d).to_str();
+        std::fs::remove_file(&out_sh).ok();
+        assert!(o.contains("sratch") && o.contains('3'), "bash dict: {}", o);
     }
 
     #[test]

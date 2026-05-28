@@ -150,12 +150,28 @@ fn is_openai(m: &str) -> bool {
         || l.starts_with("text-")
 }
 
+/// Extracts incremental text from one Anthropic SSE `data:` line.
+/// `content_block_delta` events carry `"text":"..."`; everything else
+/// yields nothing. Pure function for testability.
+pub fn sse_text_delta(line: &str) -> Option<String> {
+    let data = line.trim().strip_prefix("data:")?.trim();
+    if !data.contains("\"text_delta\"") && !data.contains("\"output_text\"") {
+        // Anthropic deltas: {"type":"content_block_delta","delta":{"type":"text_delta","text":"..."}}
+        if !data.contains("text_delta") { return None; }
+    }
+    extract_text(data, "\"text\":\"")
+}
+
 fn anthropic_call(model: &str, msgs: &str, original: &Val) -> Result<Val, String> {
     let Ok(key) = std::env::var("ANTHROPIC_API_KEY") else {
         return Ok(Val::Str(Rc::new(format!("[stub:{}] {}", model, original.to_str()))));
     };
     let base = std::env::var("ANTHROPIC_BASE_URL")
         .unwrap_or_else(|_| "https://api.anthropic.com".into());
+    let stream = std::env::var("SRATCH_STREAM").is_ok();
+    if stream {
+        return anthropic_stream(&base, &key, model, msgs);
+    }
     let body = format!(r#"{{"model":"{}","max_tokens":1024,"messages":[{}]}}"#, model, msgs);
     let out = Command::new("curl")
         .args([
@@ -170,6 +186,39 @@ fn anthropic_call(model: &str, msgs: &str, original: &Val) -> Result<Val, String
         .map_err(|e| e.to_string())?;
     let raw = String::from_utf8_lossy(&out.stdout).into_owned();
     Ok(Val::Str(Rc::new(extract_text(&raw, "\"text\":\"").unwrap_or(raw))))
+}
+
+/// SRATCH_STREAM path: spawn curl with stream:true, read the SSE stream
+/// line by line, print text deltas to stdout as they arrive, and return
+/// the accumulated text.
+fn anthropic_stream(base: &str, key: &str, model: &str, msgs: &str) -> Result<Val, String> {
+    use std::io::{BufRead, BufReader, Write};
+    let body = format!(r#"{{"model":"{}","max_tokens":1024,"stream":true,"messages":[{}]}}"#, model, msgs);
+    let mut child = Command::new("curl")
+        .args([
+            "-sS", "-N", "-X", "POST",
+            &format!("{}/v1/messages", base),
+            "-H", &format!("x-api-key: {}", key),
+            "-H", "anthropic-version: 2023-06-01",
+            "-H", "content-type: application/json",
+            "-d", &body,
+        ])
+        .stdout(std::process::Stdio::piped())
+        .spawn().map_err(|e| e.to_string())?;
+    let reader = BufReader::new(child.stdout.take().unwrap());
+    let mut acc = String::new();
+    let mut so = std::io::stdout();
+    for line in reader.lines() {
+        let line = line.map_err(|e| e.to_string())?;
+        if let Some(delta) = sse_text_delta(&line) {
+            print!("{}", delta);
+            let _ = so.flush();
+            acc.push_str(&delta);
+        }
+    }
+    let _ = child.wait();
+    println!();
+    Ok(Val::Str(Rc::new(acc)))
 }
 
 fn openai_call(model: &str, msgs: &str, original: &Val) -> Result<Val, String> {
