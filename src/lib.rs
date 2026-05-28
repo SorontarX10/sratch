@@ -42,6 +42,21 @@ mod tests {
     }
 
     #[test]
+    fn lambda_and_closures() {
+        // anonymous function value
+        assert_eq!(ev("f=:(x){^x*2}\n^f(21)").to_str(), "42");
+        // closure captures surrounding variable by value
+        assert_eq!(ev("n=10\ng=:(x){^x+n}\n^g(5)").to_str(), "15");
+        // higher-order: pass a lambda as an argument
+        assert_eq!(ev(":ap(fn,x){^fn(x)}\n^ap(:(n){^n*n},7)").to_str(), "49");
+        // lambda used in a fold over a list
+        assert_eq!(
+            ev(":ms(fn,l){s=0 *x:l{s=s+fn(x)} ^s}\n^ms(:(n){^n*n},[1,2,3,4])").to_str(),
+            "30"
+        );
+    }
+
+    #[test]
     fn if_else() {
         let out = ev("a=5\n?a>3{^\"b\"}:{^\"s\"}").to_str();
         assert_eq!(out, "b");

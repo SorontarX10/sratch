@@ -138,6 +138,7 @@ impl Interp {
                     name: name.clone(),
                     params: params.clone(),
                     body: body.clone(),
+                    captured: None,
                 }));
                 self.env.set(name, f);
                 Ok(Flow::Norm)
@@ -305,11 +306,26 @@ impl Interp {
                 }
                 out
             }
+            Expr::Lambda(params, body) => {
+                Val::Fn(Rc::new(Fun {
+                    name: "<lambda>".into(),
+                    params: params.clone(),
+                    body: body.clone(),
+                    captured: Some(self.env.snapshot()),
+                }))
+            }
         })
     }
 
     fn call_fn(&mut self, f: &Fun, args: Vec<Val>) -> Result<Val, String> {
         self.env.enter_fn();
+        // Closures: replay the captured environment into the frame first,
+        // then bind params on top (params shadow captured names).
+        if let Some(cap) = &f.captured {
+            for (k, v) in cap.iter() {
+                self.env.set_local(k, v.clone());
+            }
+        }
         for (i, p) in f.params.iter().enumerate() {
             self.env.set_local(p, args.get(i).cloned().unwrap_or(Val::Nil));
         }
@@ -475,6 +491,7 @@ fn rewrite_expr(e: &mut Expr, defs: &HashSet<String>, mangle: &impl Fn(&str) -> 
             if let Some(mm) = m { rewrite_expr(mm, defs, mangle); }
         }
         Expr::Agent(p) => rewrite_expr(p, defs, mangle),
+        Expr::Lambda(_, body) => rewrite_stmts(body, defs, mangle),
         Expr::Num(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Nil => {}
     }
 }

@@ -20,6 +20,10 @@ pub struct Fun {
     pub name: String,
     pub params: Vec<String>,
     pub body: Vec<Stmt>,
+    /// Captured environment for closures (lambdas). Snapshot of the
+    /// variables visible where the function was created. `None` for
+    /// ordinary named defs, which resolve free names globally.
+    pub captured: Option<HashMap<String, Val>>,
 }
 
 impl Val {
@@ -127,6 +131,19 @@ impl Env {
     pub fn leave_fn(&mut self) {
         self.fn_barriers.pop();
         self.scopes.pop();
+    }
+
+    /// Flatten currently-visible bindings (inner scopes win) into one map.
+    /// Used to capture a closure's environment at creation time. Excludes
+    /// the global scope (index 0) — globals stay resolvable at call time.
+    pub fn snapshot(&self) -> HashMap<String, Val> {
+        let mut out = HashMap::new();
+        for s in self.scopes.iter().skip(1) {
+            for (k, v) in s.iter() {
+                out.insert(k.clone(), v.clone());
+            }
+        }
+        out
     }
 
     pub fn get(&self, n: &str) -> Option<Val> {

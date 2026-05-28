@@ -29,6 +29,7 @@ match:     s =~ pat        glob; * (any) ? (one); -> capture | nil
 logic:     & |              (and / or, short-circuit)  !x (not)
 index:     e[i]    e.k       (.k == e["k"])
 call:      f(a,b)
+lambda:    :(a,b){...}     anonymous closure; captures visible vars
 @e         LLM(prompt=e)              -> string
            e: str -> one-shot user message
            e: list of strings -> multi-turn user/assistant/user/...

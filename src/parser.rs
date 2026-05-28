@@ -57,7 +57,8 @@ impl Parser {
             Tok::Quest => self.parse_if(),
             Tok::Star => self.parse_loop(false),
             Tok::StarQ => self.parse_loop(true),
-            Tok::Colon => self.parse_def(),
+            // `:name(` is a named def; `:(` is a lambda expression-statement.
+            Tok::Colon if matches!(self.peek2(), Tok::Ident(_)) => self.parse_def(),
             Tok::Ident(name) if matches!(self.peek2(), Tok::Eq) => {
                 let n = name.clone();
                 self.bump(); self.bump();
@@ -200,7 +201,10 @@ impl Parser {
                 let save = self.pos;
                 self.bump();
                 let r = self.parse_unary()?;
-                if matches!(self.peek(), Tok::LBr) {
+                // `*expr{` is a repeat loop; `*ident:expr{` is a for-in
+                // loop. Either way a `{` or `:` right after the operand
+                // means this `*` began a new statement, not a multiply.
+                if matches!(self.peek(), Tok::LBr | Tok::Colon) {
                     self.pos = save;
                     break;
                 }
@@ -274,6 +278,22 @@ impl Parser {
                 self.bump();
                 let e = self.parse_unary()?;
                 Ok(Expr::Agent(Box::new(e)))
+            }
+            // Lambda: :(a,b){...} — anonymous closure expression.
+            Tok::Colon => {
+                self.bump();
+                self.expect(&Tok::LP)?;
+                let mut params = Vec::new();
+                if !matches!(self.peek(), Tok::RP) {
+                    loop {
+                        if let Tok::Ident(n) = self.bump() { params.push(n); }
+                        else { return Err("lambda: param ident".into()); }
+                        if !self.eat(&Tok::Comma) { break; }
+                    }
+                }
+                self.expect(&Tok::RP)?;
+                let body = self.block()?;
+                Ok(Expr::Lambda(params, body))
             }
             Tok::Hash => {
                 self.bump();
