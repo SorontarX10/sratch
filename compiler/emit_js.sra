@@ -198,11 +198,24 @@ tk:s=>{let n=0,i=0;const b=String(s);while(i<b.length){const c=b[i];if(/\\s/.tes
   ^out
 }
 
-' --- entry point ---
+' --- entry points ---
 :emit_js(ast){
   vars=_js_collect(ast)
   out=_js_runtime()
   ?#len(vars)>0{out=out+"let "+#join(vars,",")+";\n"}
+  out=out+_js_block(ast,0)
+  ^out
+}
+
+' The runtime alone (so multi-file output can share one copy).
+:js_runtime(){^_js_runtime()}
+
+' Program body without the inline runtime; assumes a global `sr`.
+' Pair with: node -e "global.sr=require('./sr.js'); require('./prog.js')"
+:emit_js_bare(ast){
+  vars=_js_collect(ast)
+  out=""
+  ?#len(vars)>0{out="let "+#join(vars,",")+";\n"}
   out=out+_js_block(ast,0)
   ^out
 }

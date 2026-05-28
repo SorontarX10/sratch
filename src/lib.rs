@@ -367,6 +367,26 @@ code=E.{emit_fn}(P.parse(L.lex(src)))
     }
 
     #[test]
+    fn js_shared_runtime_split() {
+        // js_runtime() + emit_js_bare(ast) must behave like emit_js(ast),
+        // so a multi-file build can emit the runtime once.
+        if !std::path::Path::new("compiler/emit_js.sra").exists() { return; }
+        if std::process::Command::new("node").arg("--version").output().is_err() { return; }
+        let cf = std::env::temp_dir().join("sratch_split.js");
+        let d = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("compiler/emit_js.sra","J")
+ast=P.parse(L.lex(">2*21"))
+#wr("{out}",J.js_runtime()+J.emit_js_bare(ast))
+^#sh("node {out}")
+"#, out = cf.display());
+        let o = ev(&d).to_str();
+        std::fs::remove_file(&cf).ok();
+        assert_eq!(o.trim(), "42");
+    }
+
+    #[test]
     fn c_transpile() {
         if !std::path::Path::new("compiler/emit_c.sra").exists() { return; }
         if std::process::Command::new("gcc").arg("--version").output().is_err() { return; }

@@ -4,6 +4,15 @@ The Rust reference implementation in `src/` interprets `.sra` files
 directly. This `compiler/` directory is the path to self-hosting: a
 Sratch compiler written in Sratch.
 
+## Status
+
+Roadmap + tech-debt: complete. Language: lambdas/closures (`:(x){...}`),
+native tool-use (`#use`), `@`/`~` LLM+ReAct (Anthropic/OpenAI routing,
+prompt caching, streaming), function-barrier scoping, modules
+(`#inc(path,"P")`). Tooling: `--fmt`, `--repl`. Transpile targets:
+**js, py, sh, html, rb, go, c** — each verified end-to-end by running
+the output. Greedy-`*` parse ambiguity fixed. 39 tests green.
+
 ## Roadmap
 
 1. **lex.sra** — lexer in Sratch ✅
