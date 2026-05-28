@@ -104,6 +104,20 @@ mod tests {
     }
 
     #[test]
+    fn prelude_constants_not_clobberable_from_functions() {
+        // T/F/N resolve as evaluator constants, so a function-local named
+        // `T` creates a local and cannot corrupt the global `true`.
+        let src = ":lx(){T=[] #push(T,1) ^T}\nr=lx()\n?T{^\"T-ok\"}:{^\"T-broken\"}";
+        assert_eq!(ev(src).to_str(), "T-ok");
+        // and the constants still evaluate
+        assert_eq!(ev("?T{^\"y\"}:{^\"n\"}").to_str(), "y");
+        assert_eq!(ev("?F{^\"y\"}:{^\"n\"}").to_str(), "n");
+        assert_eq!(ev("^N").to_str(), "n");
+        // user may still shadow with an explicit binding
+        assert_eq!(ev("T=5\n^T").to_str(), "5");
+    }
+
+    #[test]
     fn lambda_and_closures() {
         // anonymous function value
         assert_eq!(ev("f=:(x){^x*2}\n^f(21)").to_str(), "42");

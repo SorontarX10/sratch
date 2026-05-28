@@ -15,11 +15,11 @@ pub struct Interp { pub env: Env }
 
 impl Interp {
     pub fn new() -> Self {
-        let mut env = Env::new();
-        env.set("T", Val::Bool(true));
-        env.set("F", Val::Bool(false));
-        env.set("N", Val::Nil);
-        Self { env }
+        // T/F/N are resolved as evaluator constants (see eval of Ident),
+        // not stored as writable globals — so a function-local named `T`
+        // can't clobber the global `true`. Users may still shadow them
+        // with an explicit binding.
+        Self { env: Env::new() }
     }
 
     pub fn run(&mut self, prog: &[Stmt]) -> Result<Val, String> {
@@ -172,7 +172,15 @@ impl Interp {
             Expr::Str(s) => Val::Str(Rc::new(s.clone())),
             Expr::Bool(b) => Val::Bool(*b),
             Expr::Nil => Val::Nil,
-            Expr::Ident(n) => self.env.get(n).ok_or_else(|| format!("undefined: {}", n))?,
+            Expr::Ident(n) => match self.env.get(n) {
+                Some(v) => v,
+                None => match n.as_str() {
+                    "T" => Val::Bool(true),
+                    "F" => Val::Bool(false),
+                    "N" => Val::Nil,
+                    _ => return Err(format!("undefined: {}", n)),
+                },
+            },
             Expr::List(items) => {
                 let mut v = Vec::with_capacity(items.len());
                 for it in items { v.push(self.eval(it)?); }

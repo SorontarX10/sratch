@@ -150,10 +150,10 @@ ENV={"scopes":[{}],"barriers":[]}
   ?name=="num"{^#num(args[0])}
   ?name=="has"{^#has(args[0],args[1])}
   ?name=="push"{
-    L=args[0]
+    _L=args[0]
     i=1
-    *?i<#len(args){#push(L,args[i]) i=i+1}
-    ^L
+    *?i<#len(args){#push(_L,args[i]) i=i+1}
+    ^_L
   }
   ?name=="pop"{^#pop(args[0])}
   ?name=="split"{^#split(args[0],args[1])}

@@ -10,15 +10,15 @@ M2=["==","!=","<=",">=","*?","=~"]
 :al(c){^#has(AL,c)}
 :an(c){^dg(c)|al(c)}
 :lex(s){
-  T=[] L=#len(s) p=0
-  *?p<L{
+  T=[] _L=#len(s) p=0
+  *?p<_L{
     c=s[p]
     ?c==" "|c=="\t"|c=="\r"{p=p+1 cnt}
-    ?c=="'"{*?p<L & s[p]!="\n"{p=p+1} cnt}
+    ?c=="'"{*?p<_L & s[p]!="\n"{p=p+1} cnt}
     ?c=="\n"{#push(T,["o","\n"]) p=p+1 cnt}
     ?c=="\""{
       p=p+1 b=""
-      *?p<L & s[p]!="\""{
+      *?p<_L & s[p]!="\""{
         ch=s[p]
         ?ch=="\\"{
           p=p+1 e=s[p]
@@ -28,9 +28,9 @@ M2=["==","!=","<=",">=","*?","=~"]
       }
       p=p+1 #push(T,["s",b]) cnt
     }
-    ?dg(c){b="" *?p<L & (dg(s[p])|s[p]=="."){b=b+s[p] p=p+1} #push(T,["n",b]) cnt}
-    ?al(c){b="" *?p<L & an(s[p]){b=b+s[p] p=p+1} #push(T,["i",b]) cnt}
-    ?p+1<L{d=c+s[p+1] ?#has(M2,d){#push(T,["o",d]) p=p+2 cnt}}
+    ?dg(c){b="" *?p<_L & (dg(s[p])|s[p]=="."){b=b+s[p] p=p+1} #push(T,["n",b]) cnt}
+    ?al(c){b="" *?p<_L & an(s[p]){b=b+s[p] p=p+1} #push(T,["i",b]) cnt}
+    ?p+1<_L{d=c+s[p+1] ?#has(M2,d){#push(T,["o",d]) p=p+2 cnt}}
     #push(T,["o",c]) p=p+1
   }
   ^T
