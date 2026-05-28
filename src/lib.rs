@@ -1,12 +1,13 @@
 pub mod ast;
 pub mod builtins;
 pub mod eval;
+pub mod fmt;
 pub mod lexer;
 pub mod llm;
 pub mod parser;
 pub mod value;
 
-use eval::Interp;
+pub use eval::Interp;
 use lexer::Lexer;
 use parser::Parser;
 use value::Val;
@@ -15,6 +16,13 @@ pub fn run(src: &str) -> Result<Val, String> {
     let toks = Lexer::new(src).tokens()?;
     let prog = Parser::new(toks).program()?;
     Interp::new().run(&prog)
+}
+
+/// Parse `src` and re-print it in canonical normalized form.
+pub fn format_src(src: &str) -> Result<String, String> {
+    let toks = Lexer::new(src).tokens()?;
+    let prog = Parser::new(toks).program()?;
+    Ok(fmt::format(&prog))
 }
 
 #[cfg(test)]
@@ -39,6 +47,25 @@ mod tests {
         assert_eq!(ev("^2*3").to_str(), "6");
         assert_eq!(ev("?2*3>5{^\"y\"}:{^\"n\"}").to_str(), "y");
         assert_eq!(ev("a=2 *3{a=a+1}\n^a").to_str(), "5");
+    }
+
+    #[test]
+    fn formatter_is_idempotent_and_runs() {
+        let src = ":f(n){?n<=1{^1} ^n*f(n-1)}\n>f(5)\nm={\"a\":1,\"b\":2}\n*x:[1,2]{>x}";
+        let f1 = format_src(src).unwrap();
+        let f2 = format_src(&f1).unwrap();
+        assert_eq!(f1, f2, "format not idempotent:\n{f1}\n---\n{f2}");
+        // formatted source still evaluates to the same result
+        assert_eq!(run(&f1).unwrap_or(value::Val::Nil).to_str(),
+                   run(src).unwrap_or(value::Val::Nil).to_str());
+    }
+
+    #[test]
+    fn repl_echoes_trailing_expr() {
+        let toks = lexer::Lexer::new("a=21\na*2").tokens().unwrap();
+        let prog = parser::Parser::new(toks).program().unwrap();
+        let mut it = Interp::new();
+        assert_eq!(it.run_repl(&prog).unwrap().to_str(), "42");
     }
 
     #[test]

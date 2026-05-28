@@ -35,6 +35,24 @@ impl Interp {
         Ok(last)
     }
 
+    /// REPL entry: like `run`, but echoes the value of a trailing bare
+    /// expression statement (so `2+3` evaluates to 5 interactively).
+    pub fn run_repl(&mut self, prog: &[Stmt]) -> Result<Val, String> {
+        for (i, s) in prog.iter().enumerate() {
+            if i + 1 == prog.len() {
+                if let Stmt::Expr(e) = s {
+                    return self.eval(e);
+                }
+            }
+            match self.exec(s)? {
+                Flow::Norm => {}
+                Flow::Ret(v) => return Ok(v),
+                _ => return Err("brk/cnt outside loop".into()),
+            }
+        }
+        Ok(Val::Nil)
+    }
+
     fn exec_block(&mut self, body: &[Stmt]) -> Result<Flow, String> {
         for s in body {
             match self.exec(s)? {
