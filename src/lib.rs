@@ -69,6 +69,31 @@ mod tests {
     }
 
     #[test]
+    fn native_tool_use_dispatches_handlers() {
+        // #use runs a structured tool-use loop: the model (mocked here)
+        // emits CALL/DONE; tool calls dispatch to handler lambdas whose
+        // return value is fed back into the transcript.
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        std::env::set_var("SRATCH_MOCK", "CALL dbl 21\n---\nDONE:got 42");
+        let out = ev("t={\"dbl\"::(x){^#num(x)*2}}\n^#use(\"double 21\",t)").to_str();
+        std::env::remove_var("SRATCH_MOCK");
+        assert_eq!(out, "got 42");
+    }
+
+    #[test]
+    fn prompt_cache_marker() {
+        use value::Val;
+        use std::rc::Rc;
+        let p = Val::Str(Rc::new("system context".into()));
+        let plain = llm::build_messages(&p, false);
+        let cached = llm::build_messages(&p, true);
+        assert!(!plain.contains("cache_control"), "plain shouldn't cache: {plain}");
+        assert!(cached.contains("\"cache_control\":{\"type\":\"ephemeral\"}"),
+                "cached must mark cache_control: {cached}");
+        assert!(cached.contains("system context"));
+    }
+
+    #[test]
     fn lambda_and_closures() {
         // anonymous function value
         assert_eq!(ev("f=:(x){^x*2}\n^f(21)").to_str(), "42");

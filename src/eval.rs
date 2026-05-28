@@ -231,7 +231,43 @@ impl Interp {
                 // #inc(path) reads, parses, and evaluates another .sra
                 // file in the current scope. Needs interpreter access,
                 // so it lives here rather than in builtins.rs.
-                if name == "inc" {
+                if name == "use" {
+                    // #use(prompt, tools) — native structured tool-use.
+                    // tools is a dict { name: handler_lambda }. Runs the
+                    // tool-use loop, dispatching tool calls to handlers.
+                    let prompt = argv.first().map(|v| v.to_str()).unwrap_or_default();
+                    let handlers: Vec<(String, Val)> = match argv.get(1) {
+                        Some(Val::Dict(d)) => d.borrow().iter()
+                            .map(|(k, v)| (k.to_str(), v.clone())).collect(),
+                        _ => return Err("#use: second arg must be a tools dict".into()),
+                    };
+                    let names: Vec<String> = handlers.iter().map(|(n, _)| n.clone()).collect();
+                    let trace = std::env::var("SRATCH_TRACE").is_ok();
+                    let max: usize = std::env::var("SRATCH_AGENT_MAX")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(20);
+                    let mut history = prompt;
+                    let mut result = Val::Nil;
+                    for _ in 0..max {
+                        match crate::llm::llm_tooluse(&history, &names)? {
+                            crate::llm::ToolReply::Text(t) => {
+                                result = Val::Str(Rc::new(t));
+                                break;
+                            }
+                            crate::llm::ToolReply::Call(tname, input) => {
+                                let h = handlers.iter().find(|(n, _)| *n == tname);
+                                let out = match h {
+                                    Some((_, Val::Fn(f))) => {
+                                        self.call_fn(f, vec![Val::Str(Rc::new(input.clone()))])?
+                                    }
+                                    _ => Val::Str(Rc::new(format!("no tool {}", tname))),
+                                };
+                                if trace { eprintln!("<<CALL {}({}) >>{}", tname, input, out.to_str()); }
+                                history.push_str(&format!("\nTOOL {}({}) -> {}", tname, input, out.to_str()));
+                            }
+                        }
+                    }
+                    result
+                } else if name == "inc" {
                     let path = argv.first()
                         .ok_or("inc: path required")?
                         .to_str();

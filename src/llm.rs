@@ -5,6 +5,76 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static MOCK_IDX: AtomicUsize = AtomicUsize::new(0);
+static TU_IDX: AtomicUsize = AtomicUsize::new(0);
+
+/// One step of a native tool-use exchange.
+pub enum ToolReply {
+    /// Final assistant text — the loop ends.
+    Text(String),
+    /// The model wants tool `name` invoked with the given string input.
+    Call(String, String),
+}
+
+/// One round of structured tool-use. `history` is the running transcript,
+/// `tool_names` the registered tool names (sent as the API tools schema).
+///
+/// Mock mode (SRATCH_MOCK, `\n---\n`-separated, cycled independently of @):
+///   "CALL <name> <input...>"  -> ToolReply::Call
+///   "DONE:<text>"             -> ToolReply::Text
+/// Real mode (ANTHROPIC_API_KEY): Anthropic Messages tools API; a
+/// `tool_use` content block becomes Call, otherwise the text is returned.
+pub fn llm_tooluse(history: &str, tool_names: &[String]) -> Result<ToolReply, String> {
+    if let Ok(mock) = std::env::var("SRATCH_MOCK") {
+        let parts: Vec<&str> = mock.split("\n---\n").collect();
+        if !parts.is_empty() {
+            let i = TU_IDX.fetch_add(1, Ordering::SeqCst) % parts.len();
+            let r = parts[i];
+            if let Some(rest) = r.strip_prefix("CALL ") {
+                let mut it = rest.splitn(2, ' ');
+                let name = it.next().unwrap_or("").to_string();
+                let input = it.next().unwrap_or("").to_string();
+                return Ok(ToolReply::Call(name, input));
+            }
+            if let Some(t) = r.strip_prefix("DONE:") {
+                return Ok(ToolReply::Text(t.to_string()));
+            }
+            return Ok(ToolReply::Text(r.to_string()));
+        }
+    }
+
+    let model = std::env::var("SRATCH_MODEL").unwrap_or_else(|_| "claude-haiku-4-5".into());
+    let Ok(key) = std::env::var("ANTHROPIC_API_KEY") else {
+        return Ok(ToolReply::Text(format!("[stub:{}] {}", model, history)));
+    };
+    let base = std::env::var("ANTHROPIC_BASE_URL")
+        .unwrap_or_else(|_| "https://api.anthropic.com".into());
+    let tools: Vec<String> = tool_names.iter().map(|n| format!(
+        r#"{{"name":{},"description":"sratch tool","input_schema":{{"type":"object","properties":{{"input":{{"type":"string"}}}},"required":["input"]}}}}"#,
+        json_encode(&Val::Str(Rc::new(n.clone())))
+    )).collect();
+    let body = format!(
+        r#"{{"model":"{}","max_tokens":1024,"tools":[{}],"messages":[{{"role":"user","content":{}}}]}}"#,
+        model, tools.join(","), json_encode(&Val::Str(Rc::new(history.to_string()))),
+    );
+    let out = Command::new("curl")
+        .args([
+            "-sS", "-X", "POST", &format!("{}/v1/messages", base),
+            "-H", &format!("x-api-key: {}", key),
+            "-H", "anthropic-version: 2023-06-01",
+            "-H", "content-type: application/json",
+            "-d", &body,
+        ])
+        .output().map_err(|e| e.to_string())?;
+    let raw = String::from_utf8_lossy(&out.stdout).into_owned();
+    // tool_use block? pull "name" and the input string.
+    if let Some(name) = extract_text(&raw, "\"type\":\"tool_use\",\"id\":\"")
+        .and(extract_text(&raw, "\"name\":\""))
+    {
+        let input = extract_text(&raw, "\"input\":{\"input\":\"").unwrap_or_default();
+        return Ok(ToolReply::Call(name, input));
+    }
+    Ok(ToolReply::Text(extract_text(&raw, "\"text\":\"").unwrap_or(raw)))
+}
 
 /// @prompt  or  @prompt %model
 ///
@@ -29,34 +99,44 @@ pub fn llm_call(prompt: &Val, model: Option<&Val>) -> Result<Val, String> {
         }
     }
 
-    let msgs = build_messages(prompt);
+    let cache = std::env::var("SRATCH_CACHE").is_ok();
     if is_openai(&m) {
-        openai_call(&m, &msgs, prompt)
+        // OpenAI caches automatically; no per-request marker.
+        openai_call(&m, &build_messages(prompt, false), prompt)
     } else {
-        anthropic_call(&m, &msgs, prompt)
+        anthropic_call(&m, &build_messages(prompt, cache), prompt)
     }
 }
 
 /// Builds the `"messages"` JSON array body from either a single prompt
 /// string (one user message) or a Val::List of alternating user/assistant
-/// strings (multi-turn).
-fn build_messages(p: &Val) -> String {
-    match p {
+/// strings (multi-turn). When `cache` is set, the final message's content
+/// becomes a text block tagged with cache_control so Anthropic prompt-
+/// caches everything up to it.
+pub fn build_messages(p: &Val, cache: bool) -> String {
+    let msgs: Vec<(&'static str, String)> = match p {
         Val::List(l) => {
             let items = l.borrow();
-            let mut parts: Vec<String> = Vec::with_capacity(items.len());
-            for (i, m) in items.iter().enumerate() {
+            items.iter().enumerate().map(|(i, m)| {
                 let role = if i % 2 == 0 { "user" } else { "assistant" };
-                let content = json_encode(&Val::Str(Rc::new(m.to_str())));
-                parts.push(format!(r#"{{"role":"{}","content":{}}}"#, role, content));
-            }
-            parts.join(",")
+                (role, m.to_str())
+            }).collect()
         }
-        other => {
-            let content = json_encode(&Val::Str(Rc::new(other.to_str())));
-            format!(r#"{{"role":"user","content":{}}}"#, content)
+        other => vec![("user", other.to_str())],
+    };
+    let n = msgs.len();
+    let parts: Vec<String> = msgs.iter().enumerate().map(|(i, (role, text))| {
+        let last = i + 1 == n;
+        if cache && last {
+            format!(
+                r#"{{"role":"{}","content":[{{"type":"text","text":{},"cache_control":{{"type":"ephemeral"}}}}]}}"#,
+                role, json_encode(&Val::Str(Rc::new(text.clone()))),
+            )
+        } else {
+            format!(r#"{{"role":"{}","content":{}}}"#, role, json_encode(&Val::Str(Rc::new(text.clone()))))
         }
-    }
+    }).collect();
+    parts.join(",")
 }
 
 fn is_openai(m: &str) -> bool {
@@ -76,10 +156,7 @@ fn anthropic_call(model: &str, msgs: &str, original: &Val) -> Result<Val, String
     };
     let base = std::env::var("ANTHROPIC_BASE_URL")
         .unwrap_or_else(|_| "https://api.anthropic.com".into());
-    let body = format!(
-        r#"{{"model":"{}","max_tokens":1024,"messages":[{}]}}"#,
-        model, msgs,
-    );
+    let body = format!(r#"{{"model":"{}","max_tokens":1024,"messages":[{}]}}"#, model, msgs);
     let out = Command::new("curl")
         .args([
             "-sS", "-X", "POST",

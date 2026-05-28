@@ -35,7 +35,8 @@ lambda:    :(a,b){...}     anonymous closure; captures visible vars
            e: list of strings -> multi-turn user/assistant/user/...
 @e %m      LLM with model m           -> string
 #t(a,b)    call tool t                -> value
-~e         ReAct(initial=e)           -> final DONE: text
+~e         ReAct(initial=e)           -> final DONE: text (text protocol)
+#use(p,t)  native tool-use; t={name:handler_lambda,...} -> final text
 ```
 
 ## string escapes (agent-vocab dictionary)
