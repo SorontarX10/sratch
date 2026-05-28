@@ -210,7 +210,15 @@ _SHESC={"\"":"\\\"","\\":"\\\\","$":"\\$","`":"\\`"}
     ?e[0]=="T"{
       P=[]
       *a:e[2]{#push(P,_sh_e(a))}
-      ^i+"sr_"+e[1]+" "+#join(P," ")
+      ' push/pop mutate their list arg; with bash value semantics we
+      ' reassign the variable instead of echoing the result to stdout.
+      ?(e[1]=="push"|e[1]=="pop") & e[2][0][0]=="i"{
+        ^i+e[2][0][1]+"=$(sr_"+e[1]+" "+#join(P," ")+")"
+      }
+      ' p prints (keep stdout); other bare tool calls discard their
+      ' return value to avoid leaking it to stdout.
+      ?e[1]=="p"{^i+"sr_p "+#join(P," ")}
+      ^i+"sr_"+e[1]+" "+#join(P," ")+" >/dev/null"
     }
     ^i+":  # expr: "+_sh_e(e)
   }
