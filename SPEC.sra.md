@@ -29,12 +29,14 @@ match:     s =~ pat        glob; * (any) ? (one); -> capture | nil
 logic:     & |              (and / or, short-circuit)  !x (not)
 index:     e[i]    e.k       (.k == e["k"])
 call:      f(a,b)
+lambda:    :(a,b){...}     anonymous closure; captures visible vars
 @e         LLM(prompt=e)              -> string
            e: str -> one-shot user message
            e: list of strings -> multi-turn user/assistant/user/...
 @e %m      LLM with model m           -> string
 #t(a,b)    call tool t                -> value
-~e         ReAct(initial=e)           -> final DONE: text
+~e         ReAct(initial=e)           -> final DONE: text (text protocol)
+#use(p,t)  native tool-use; t={name:handler_lambda,...} -> final text
 ```
 
 ## string escapes (agent-vocab dictionary)

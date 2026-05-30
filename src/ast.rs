@@ -15,6 +15,7 @@ pub enum Expr {
     Tool(String, Vec<Expr>),      // #name(args)
     Llm(Box<Expr>, Option<Box<Expr>>), // @prompt or @prompt %model
     Agent(Box<Expr>),             // ~prompt — run full ReAct loop, return DONE text
+    Lambda(Vec<String>, Vec<Stmt>), // :(a,b){...} — anonymous closure
 }
 
 #[derive(Debug, Clone)]

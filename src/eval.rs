@@ -15,11 +15,11 @@ pub struct Interp { pub env: Env }
 
 impl Interp {
     pub fn new() -> Self {
-        let mut env = Env::new();
-        env.set("T", Val::Bool(true));
-        env.set("F", Val::Bool(false));
-        env.set("N", Val::Nil);
-        Self { env }
+        // T/F/N are resolved as evaluator constants (see eval of Ident),
+        // not stored as writable globals — so a function-local named `T`
+        // can't clobber the global `true`. Users may still shadow them
+        // with an explicit binding.
+        Self { env: Env::new() }
     }
 
     pub fn run(&mut self, prog: &[Stmt]) -> Result<Val, String> {
@@ -33,6 +33,24 @@ impl Interp {
             last = Val::Nil;
         }
         Ok(last)
+    }
+
+    /// REPL entry: like `run`, but echoes the value of a trailing bare
+    /// expression statement (so `2+3` evaluates to 5 interactively).
+    pub fn run_repl(&mut self, prog: &[Stmt]) -> Result<Val, String> {
+        for (i, s) in prog.iter().enumerate() {
+            if i + 1 == prog.len() {
+                if let Stmt::Expr(e) = s {
+                    return self.eval(e);
+                }
+            }
+            match self.exec(s)? {
+                Flow::Norm => {}
+                Flow::Ret(v) => return Ok(v),
+                _ => return Err("brk/cnt outside loop".into()),
+            }
+        }
+        Ok(Val::Nil)
     }
 
     fn exec_block(&mut self, body: &[Stmt]) -> Result<Flow, String> {
@@ -138,6 +156,7 @@ impl Interp {
                     name: name.clone(),
                     params: params.clone(),
                     body: body.clone(),
+                    captured: None,
                 }));
                 self.env.set(name, f);
                 Ok(Flow::Norm)
@@ -153,7 +172,15 @@ impl Interp {
             Expr::Str(s) => Val::Str(Rc::new(s.clone())),
             Expr::Bool(b) => Val::Bool(*b),
             Expr::Nil => Val::Nil,
-            Expr::Ident(n) => self.env.get(n).ok_or_else(|| format!("undefined: {}", n))?,
+            Expr::Ident(n) => match self.env.get(n) {
+                Some(v) => v,
+                None => match n.as_str() {
+                    "T" => Val::Bool(true),
+                    "F" => Val::Bool(false),
+                    "N" => Val::Nil,
+                    _ => return Err(format!("undefined: {}", n)),
+                },
+            },
             Expr::List(items) => {
                 let mut v = Vec::with_capacity(items.len());
                 for it in items { v.push(self.eval(it)?); }
@@ -212,7 +239,43 @@ impl Interp {
                 // #inc(path) reads, parses, and evaluates another .sra
                 // file in the current scope. Needs interpreter access,
                 // so it lives here rather than in builtins.rs.
-                if name == "inc" {
+                if name == "use" {
+                    // #use(prompt, tools) — native structured tool-use.
+                    // tools is a dict { name: handler_lambda }. Runs the
+                    // tool-use loop, dispatching tool calls to handlers.
+                    let prompt = argv.first().map(|v| v.to_str()).unwrap_or_default();
+                    let handlers: Vec<(String, Val)> = match argv.get(1) {
+                        Some(Val::Dict(d)) => d.borrow().iter()
+                            .map(|(k, v)| (k.to_str(), v.clone())).collect(),
+                        _ => return Err("#use: second arg must be a tools dict".into()),
+                    };
+                    let names: Vec<String> = handlers.iter().map(|(n, _)| n.clone()).collect();
+                    let trace = std::env::var("SRATCH_TRACE").is_ok();
+                    let max: usize = std::env::var("SRATCH_AGENT_MAX")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(20);
+                    let mut history = prompt;
+                    let mut result = Val::Nil;
+                    for _ in 0..max {
+                        match crate::llm::llm_tooluse(&history, &names)? {
+                            crate::llm::ToolReply::Text(t) => {
+                                result = Val::Str(Rc::new(t));
+                                break;
+                            }
+                            crate::llm::ToolReply::Call(tname, input) => {
+                                let h = handlers.iter().find(|(n, _)| *n == tname);
+                                let out = match h {
+                                    Some((_, Val::Fn(f))) => {
+                                        self.call_fn(f, vec![Val::Str(Rc::new(input.clone()))])?
+                                    }
+                                    _ => Val::Str(Rc::new(format!("no tool {}", tname))),
+                                };
+                                if trace { eprintln!("<<CALL {}({}) >>{}", tname, input, out.to_str()); }
+                                history.push_str(&format!("\nTOOL {}({}) -> {}", tname, input, out.to_str()));
+                            }
+                        }
+                    }
+                    result
+                } else if name == "inc" {
                     let path = argv.first()
                         .ok_or("inc: path required")?
                         .to_str();
@@ -305,11 +368,26 @@ impl Interp {
                 }
                 out
             }
+            Expr::Lambda(params, body) => {
+                Val::Fn(Rc::new(Fun {
+                    name: "<lambda>".into(),
+                    params: params.clone(),
+                    body: body.clone(),
+                    captured: Some(self.env.snapshot()),
+                }))
+            }
         })
     }
 
     fn call_fn(&mut self, f: &Fun, args: Vec<Val>) -> Result<Val, String> {
         self.env.enter_fn();
+        // Closures: replay the captured environment into the frame first,
+        // then bind params on top (params shadow captured names).
+        if let Some(cap) = &f.captured {
+            for (k, v) in cap.iter() {
+                self.env.set_local(k, v.clone());
+            }
+        }
         for (i, p) in f.params.iter().enumerate() {
             self.env.set_local(p, args.get(i).cloned().unwrap_or(Val::Nil));
         }
@@ -475,6 +553,7 @@ fn rewrite_expr(e: &mut Expr, defs: &HashSet<String>, mangle: &impl Fn(&str) -> 
             if let Some(mm) = m { rewrite_expr(mm, defs, mangle); }
         }
         Expr::Agent(p) => rewrite_expr(p, defs, mangle),
+        Expr::Lambda(_, body) => rewrite_stmts(body, defs, mangle),
         Expr::Num(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Nil => {}
     }
 }

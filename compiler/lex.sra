@@ -18,17 +18,17 @@ M2=["==","!=","<=",">=","*?","=~"]
 
 :lex(s){
   T=[]
-  L=#len(s)
+  _L=#len(s)
   p=0
-  *?p<L{
+  *?p<_L{
     c=s[p]
     ?c==" "|c=="\t"|c=="\r"{p=p+1 cnt}
-    ?c=="'"{*?p<L & s[p]!="\n"{p=p+1} cnt}
+    ?c=="'"{*?p<_L & s[p]!="\n"{p=p+1} cnt}
     ?c=="\n"{#push(T,["o","\n"]) p=p+1 cnt}
     ?c=="\""{
       p=p+1
       b=""
-      *?p<L & s[p]!="\""{
+      *?p<_L & s[p]!="\""{
         ch=s[p]
         ?ch=="\\"{
           p=p+1
@@ -43,17 +43,17 @@ M2=["==","!=","<=",">=","*?","=~"]
     }
     ?dg(c){
       b=""
-      *?p<L & (dg(s[p])|s[p]=="."){b=b+s[p] p=p+1}
+      *?p<_L & (dg(s[p])|s[p]=="."){b=b+s[p] p=p+1}
       #push(T,["n",b])
       cnt
     }
     ?al(c){
       b=""
-      *?p<L & an(s[p]){b=b+s[p] p=p+1}
+      *?p<_L & an(s[p]){b=b+s[p] p=p+1}
       #push(T,["i",b])
       cnt
     }
-    ?p+1<L{
+    ?p+1<_L{
       d=c+s[p+1]
       ?#has(M2,d){#push(T,["o",d]) p=p+2 cnt}
     }

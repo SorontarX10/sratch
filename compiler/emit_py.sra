@@ -66,7 +66,10 @@ _PYESC={"\"":"\\\"","\\":"\\\\","\n":"\\n","\t":"\\t","\r":"\\r"}
     *a:e[2]{#push(P,_py_e(a))}
     ^_py_tool(e[1],P)
   }
-  ?k=="@"{^"_llm("+_py_e(e[1])+")"}
+  ?k=="@"{
+    ?e[2]!=N{^"_llm("+_py_e(e[1])+","+_py_e(e[2])+")"}
+    ^"_llm("+_py_e(e[1])+")"
+  }
   ?k=="~"{^"_react("+_py_e(e[1])+")"}
   ^"None"
 }
@@ -86,7 +89,7 @@ _PYESC={"\"":"\\\"","\\":"\\\\","\n":"\\n","\t":"\\t","\r":"\\r"}
   ?name=="pop"{^a0+".pop()"}
   ?name=="has"{^"("+a1+" in "+a0+")"}
   ?name=="split"{^a0+".split("+a1+")"}
-  ?name=="join"{^a1+".join("+a0+")"}
+  ?name=="join"{^a1+".join(str(x) for x in "+a0+")"}
   ?name=="up"{^a0+".upper()"}
   ?name=="lo"{^a0+".lower()"}
   ?name=="trim"{^a0+".strip()"}
@@ -139,17 +142,46 @@ _PYESC={"\"":"\\\"","\\":"\\\\","\n":"\\n","\t":"\\t","\r":"\\r"}
 
 ' --- prelude: bring in Python deps used by emitted code ---
 _PY_PRELUDE="import json as _json
-import sys, subprocess, urllib.request
+import os, sys, subprocess, urllib.request
 
+_MI=[0]
 def _sh(cmd):
-    return subprocess.check_output(cmd, shell=True, text=True).rstrip(\"\\n\")
+    return subprocess.run([\"bash\",\"-c\",cmd], capture_output=True, text=True).stdout.rstrip(\"\\n\")
 def _get(url):
     with urllib.request.urlopen(url) as r:
         return r.read().decode()
 def _llm(p, m=None):
-    return f\"[stub:{m or 'claude-haiku-4-5'}] {p}\"
-def _react(p):
-    return f\"DONE:[react-stub] {p}\"
+    m = m or os.environ.get(\"SRATCH_MODEL\") or \"claude-haiku-4-5\"
+    mk = os.environ.get(\"SRATCH_MOCK\")
+    if mk is not None:
+        parts = mk.split(\"\\n---\\n\"); r = parts[_MI[0] % len(parts)]; _MI[0]+=1; return r
+    isO = m[:4]==\"gpt-\" or m[:2] in (\"o1\",\"o3\",\"o4\") or m[:7]==\"chatgpt\"
+    key = os.environ.get(\"OPENAI_API_KEY\" if isO else \"ANTHROPIC_API_KEY\")
+    if not key:
+        return f\"[stub:{m}] {p}\"
+    if isO:
+        url=(os.environ.get(\"OPENAI_BASE_URL\") or \"https://api.openai.com\")+\"/v1/chat/completions\"
+        hdr=[\"-H\",\"authorization: Bearer \"+key]
+        body=_json.dumps({\"model\":m,\"messages\":[{\"role\":\"user\",\"content\":p}]})
+    else:
+        url=(os.environ.get(\"ANTHROPIC_BASE_URL\") or \"https://api.anthropic.com\")+\"/v1/messages\"
+        hdr=[\"-H\",\"x-api-key: \"+key,\"-H\",\"anthropic-version: 2023-06-01\"]
+        body=_json.dumps({\"model\":m,\"max_tokens\":1024,\"messages\":[{\"role\":\"user\",\"content\":p}]})
+    out=subprocess.run([\"curl\",\"-sS\",\"-X\",\"POST\",url,\"-H\",\"content-type: application/json\"]+hdr+[\"-d\",\"@-\"], input=body, capture_output=True, text=True).stdout
+    try:
+        j=_json.loads(out); return j[\"choices\"][0][\"message\"][\"content\"] if isO else j[\"content\"][0][\"text\"]
+    except Exception:
+        return out
+def _react(h):
+    mx=int(os.environ.get(\"SRATCH_AGENT_MAX\") or \"20\"); o=\"\"
+    for _ in range(mx):
+        r=_llm(str(h))
+        if \"DONE:\" in r: return r
+        j=r.find(\"SH:\")
+        if j>=0: h=str(h)+\"\\nO:\"+_sh(r[j+3:].strip())
+        else: h=str(h)+\"\\nE\"
+        o=r
+    return o
 "
 
 :py_emit(ast){

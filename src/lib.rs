@@ -1,12 +1,13 @@
 pub mod ast;
 pub mod builtins;
 pub mod eval;
+pub mod fmt;
 pub mod lexer;
 pub mod llm;
 pub mod parser;
 pub mod value;
 
-use eval::Interp;
+pub use eval::Interp;
 use lexer::Lexer;
 use parser::Parser;
 use value::Val;
@@ -15,6 +16,13 @@ pub fn run(src: &str) -> Result<Val, String> {
     let toks = Lexer::new(src).tokens()?;
     let prog = Parser::new(toks).program()?;
     Interp::new().run(&prog)
+}
+
+/// Parse `src` and re-print it in canonical normalized form.
+pub fn format_src(src: &str) -> Result<String, String> {
+    let toks = Lexer::new(src).tokens()?;
+    let prog = Parser::new(toks).program()?;
+    Ok(fmt::format(&prog))
 }
 
 #[cfg(test)]
@@ -28,6 +36,114 @@ mod tests {
     #[test]
     fn arith() {
         assert_eq!(ev("a=1+2*3\n^a").to_str(), "7");
+    }
+
+    #[test]
+    fn star_loop_vs_multiply_disambiguation() {
+        // `*` is multiply inside an expression, but a `*expr{...}` loop
+        // on the same line after another statement must parse as a loop.
+        // Multiply still works, including inside an if-condition.
+        assert_eq!(ev(":f(d){r=\"\" *d{r=r+\"x\"} ^r}\n^f(3)").to_str(), "xxx");
+        assert_eq!(ev("^2*3").to_str(), "6");
+        assert_eq!(ev("?2*3>5{^\"y\"}:{^\"n\"}").to_str(), "y");
+        assert_eq!(ev("a=2 *3{a=a+1}\n^a").to_str(), "5");
+    }
+
+    #[test]
+    fn formatter_is_idempotent_and_runs() {
+        let src = ":f(n){?n<=1{^1} ^n*f(n-1)}\n>f(5)\nm={\"a\":1,\"b\":2}\n*x:[1,2]{>x}";
+        let f1 = format_src(src).unwrap();
+        let f2 = format_src(&f1).unwrap();
+        assert_eq!(f1, f2, "format not idempotent:\n{f1}\n---\n{f2}");
+        // formatted source still evaluates to the same result
+        assert_eq!(run(&f1).unwrap_or(value::Val::Nil).to_str(),
+                   run(src).unwrap_or(value::Val::Nil).to_str());
+    }
+
+    #[test]
+    fn repl_echoes_trailing_expr() {
+        let toks = lexer::Lexer::new("a=21\na*2").tokens().unwrap();
+        let prog = parser::Parser::new(toks).program().unwrap();
+        let mut it = Interp::new();
+        assert_eq!(it.run_repl(&prog).unwrap().to_str(), "42");
+    }
+
+    #[test]
+    fn native_tool_use_dispatches_handlers() {
+        // #use runs a structured tool-use loop: the model (mocked here)
+        // emits CALL/DONE; tool calls dispatch to handler lambdas whose
+        // return value is fed back into the transcript.
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        std::env::set_var("SRATCH_MOCK", "CALL dbl 21\n---\nDONE:got 42");
+        let out = ev("t={\"dbl\"::(x){^#num(x)*2}}\n^#use(\"double 21\",t)").to_str();
+        std::env::remove_var("SRATCH_MOCK");
+        assert_eq!(out, "got 42");
+    }
+
+    #[test]
+    fn sse_delta_parsing() {
+        // Anthropic streaming deltas yield incremental text; other events don't.
+        let d = r#"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}"#;
+        assert_eq!(llm::sse_text_delta(d), Some("Hel".to_string()));
+        let stop = r#"data: {"type":"message_stop"}"#;
+        assert_eq!(llm::sse_text_delta(stop), None);
+        assert_eq!(llm::sse_text_delta("event: ping"), None);
+    }
+
+    #[test]
+    fn prompt_cache_marker() {
+        use value::Val;
+        use std::rc::Rc;
+        let p = Val::Str(Rc::new("system context".into()));
+        let plain = llm::build_messages(&p, false);
+        let cached = llm::build_messages(&p, true);
+        assert!(!plain.contains("cache_control"), "plain shouldn't cache: {plain}");
+        assert!(cached.contains("\"cache_control\":{\"type\":\"ephemeral\"}"),
+                "cached must mark cache_control: {cached}");
+        assert!(cached.contains("system context"));
+    }
+
+    #[test]
+    fn syntax_highlighter_spans() {
+        if !std::path::Path::new("compiler/highlight.sra").exists() { return; }
+        let d = r#"
+#inc("compiler/highlight.sra","H")
+^H.hl(":sq(n){^n*42} 'c\n>sq(3)")
+"#;
+        let out = ev(d).to_str();
+        assert!(out.contains("class=\"nu\">42"), "number span: {out}");
+        assert!(out.contains("class=\"cm\">"), "comment span: {out}");
+        assert!(out.contains("class=\"op\">&gt;"), "escaped op span: {out}");
+        assert!(out.contains("<pre class=\"sratch\">"));
+    }
+
+    #[test]
+    fn prelude_constants_not_clobberable_from_functions() {
+        // T/F/N resolve as evaluator constants, so a function-local named
+        // `T` creates a local and cannot corrupt the global `true`.
+        let src = ":lx(){T=[] #push(T,1) ^T}\nr=lx()\n?T{^\"T-ok\"}:{^\"T-broken\"}";
+        assert_eq!(ev(src).to_str(), "T-ok");
+        // and the constants still evaluate
+        assert_eq!(ev("?T{^\"y\"}:{^\"n\"}").to_str(), "y");
+        assert_eq!(ev("?F{^\"y\"}:{^\"n\"}").to_str(), "n");
+        assert_eq!(ev("^N").to_str(), "n");
+        // user may still shadow with an explicit binding
+        assert_eq!(ev("T=5\n^T").to_str(), "5");
+    }
+
+    #[test]
+    fn lambda_and_closures() {
+        // anonymous function value
+        assert_eq!(ev("f=:(x){^x*2}\n^f(21)").to_str(), "42");
+        // closure captures surrounding variable by value
+        assert_eq!(ev("n=10\ng=:(x){^x+n}\n^g(5)").to_str(), "15");
+        // higher-order: pass a lambda as an argument
+        assert_eq!(ev(":ap(fn,x){^fn(x)}\n^ap(:(n){^n*n},7)").to_str(), "49");
+        // lambda used in a fold over a list
+        assert_eq!(
+            ev(":ms(fn,l){s=0 *x:l{s=s+fn(x)} ^s}\n^ms(:(n){^n*n},[1,2,3,4])").to_str(),
+            "30"
+        );
     }
 
     #[test]
@@ -200,6 +316,195 @@ ast=parse(lex(prog))
 "#;
         let out = ev(src).to_str();
         assert_eq!(out, "720");
+    }
+
+    #[test]
+    fn sh_transpile_round_trip() {
+        // Transpile Sratch -> Bash, run it, compare output. Skipped if
+        // the compiler module isn't there.
+        if !std::path::Path::new("compiler/emit_sh.sra").exists() { return; }
+        let out_sh = std::env::temp_dir().join("sratch_sh_out.sh");
+        let driver = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("compiler/emit_sh.sra","Sh")
+src=":fact(n){{?n<=1{{^1}} ^n*fact(n-1)}}
+>fact(5)"
+sh=Sh.emit_sh(P.parse(L.lex(src)))
+#wr("{out}",sh)
+^#sh("bash {out}")
+"#, out = out_sh.display());
+        let out = ev(&driver).to_str();
+        std::fs::remove_file(&out_sh).ok();
+        assert_eq!(out, "120");
+    }
+
+    #[test]
+    fn html_wrap_produces_doc() {
+        if !std::path::Path::new("compiler/emit_html.sra").exists() { return; }
+        let driver = r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("compiler/emit_js.sra","J")
+#inc("compiler/emit_html.sra","H")
+js=J.emit_js(P.parse(L.lex(">42")))
+^H.wrap_html(js)
+"#;
+        let out = ev(driver).to_str();
+        assert!(out.starts_with("<!DOCTYPE html>"), "expected HTML doctype");
+        assert!(out.contains("sr.print(42)"), "expected JS body inline");
+        assert!(out.contains("</script></body></html>"), "expected proper close");
+    }
+
+    fn transpile_run(emit_fn: &str, ext: &str, runner: &str) -> Option<String> {
+        let module = format!("compiler/emit_{}.sra", ext);
+        if !std::path::Path::new(&module).exists() { return None; }
+        let bin = runner.split_whitespace().next().unwrap();
+        if std::process::Command::new(bin).arg("--version").output().is_err() { return None; }
+        let out_file = std::env::temp_dir().join(format!("sratch_t.{}", ext));
+        let driver = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("{module}","E")
+src=":fact(n){{?n<=1{{^1}} ^n*fact(n-1)}}
+>fact(6)
+M=[1,2,3]
+#push(M,4)
+>#join(M,\",\")"
+code=E.{emit_fn}(P.parse(L.lex(src)))
+#wr("{out}",code)
+^#sh("{runner} {out} 2>&1")
+"#, module = module, emit_fn = emit_fn, out = out_file.display(), runner = runner);
+        let r = ev(&driver).to_str();
+        std::fs::remove_file(&out_file).ok();
+        Some(r)
+    }
+
+    #[test]
+    fn ruby_transpile() {
+        if let Some(out) = transpile_run("rb_emit", "rb", "ruby") {
+            assert!(out.contains("720") && out.contains("1,2,3,4"), "ruby: {}", out);
+        }
+    }
+
+    #[test]
+    fn go_transpile() {
+        if let Some(out) = transpile_run("go_emit", "go", "go run") {
+            assert!(out.contains("720") && out.contains("1,2,3,4"), "go: {}", out);
+        }
+    }
+
+    #[test]
+    fn js_shared_runtime_split() {
+        // js_runtime() + emit_js_bare(ast) must behave like emit_js(ast),
+        // so a multi-file build can emit the runtime once.
+        if !std::path::Path::new("compiler/emit_js.sra").exists() { return; }
+        if std::process::Command::new("node").arg("--version").output().is_err() { return; }
+        let cf = std::env::temp_dir().join("sratch_split.js");
+        let d = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("compiler/emit_js.sra","J")
+ast=P.parse(L.lex(">2*21"))
+#wr("{out}",J.js_runtime()+J.emit_js_bare(ast))
+^#sh("node {out}")
+"#, out = cf.display());
+        let o = ev(&d).to_str();
+        std::fs::remove_file(&cf).ok();
+        assert_eq!(o.trim(), "42");
+    }
+
+    #[test]
+    fn c_transpile() {
+        if !std::path::Path::new("compiler/emit_c.sra").exists() { return; }
+        if std::process::Command::new("gcc").arg("--version").output().is_err() { return; }
+        let cf = std::env::temp_dir().join("sratch_t.c");
+        let bin = std::env::temp_dir().join("sratch_t_cbin");
+        let d = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("compiler/emit_c.sra","C")
+src=":fact(n){{?n<=1{{^1}} ^n*fact(n-1)}}
+>fact(6)
+M=[1,2,3]
+#push(M,4)
+>#join(M,\",\")"
+code=C.c_emit(P.parse(L.lex(src)))
+#wr("{cf}",code)
+^#sh("gcc -w {cf} -o {bin} 2>&1 && {bin}")
+"#, cf = cf.display(), bin = bin.display());
+        let o = ev(&d).to_str();
+        std::fs::remove_file(&cf).ok();
+        std::fs::remove_file(&bin).ok();
+        assert!(o.contains("720") && o.contains("1,2,3,4"), "c: {}", o);
+    }
+
+    #[test]
+    fn bash_dict_via_assoc_array() {
+        if !std::path::Path::new("compiler/emit_sh.sra").exists() { return; }
+        let out_sh = std::env::temp_dir().join("sratch_dict.sh");
+        let d = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("compiler/emit_sh.sra","S")
+src="d={{\"name\":\"sratch\",\"ver\":3}}
+>d.name
+>d.ver"
+sh=S.emit_sh(P.parse(L.lex(src)))
+#wr("{out}",sh)
+^#sh("bash {out}")
+"#, out = out_sh.display());
+        let o = ev(&d).to_str();
+        std::fs::remove_file(&out_sh).ok();
+        assert!(o.contains("sratch") && o.contains('3'), "bash dict: {}", o);
+    }
+
+    #[test]
+    fn js_llm_bridge_stub_and_agent() {
+        if !std::path::Path::new("compiler/emit_js.sra").exists() { return; }
+        if std::process::Command::new("node").arg("--version").output().is_err() { return; }
+        let out_js = std::env::temp_dir().join("sratch_jsllm.js");
+        // @ stub path (no API key) + provider routing
+        let d1 = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("compiler/emit_js.sra","J")
+js=J.emit_js(P.parse(L.lex(">@\"hi\" %\"gpt-4o\"")))
+#wr("{out}",js)
+^#sh("node {out}")
+"#, out = out_js.display());
+        let o1 = ev(&d1).to_str();
+        assert!(o1.contains("stub:gpt-4o") && o1.contains("hi"), "js @ stub: {}", o1);
+        // ~ agent loop driven by SRATCH_MOCK
+        let d2 = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("compiler/emit_js.sra","J")
+js=J.emit_js(P.parse(L.lex(">~\"go\"")))
+#wr("{out}",js)
+^#sh("SRATCH_MOCK=$(printf 'SH:echo hi\n---\nDONE:ok') node {out}")
+"#, out = out_js.display());
+        let o2 = ev(&d2).to_str();
+        std::fs::remove_file(&out_js).ok();
+        assert!(o2.contains("DONE:ok"), "js ~ agent: {}", o2);
+    }
+
+    #[test]
+    fn py_llm_bridge_stub() {
+        if !std::path::Path::new("compiler/emit_py.sra").exists() { return; }
+        if std::process::Command::new("python3").arg("--version").output().is_err() { return; }
+        let out_py = std::env::temp_dir().join("sratch_pyllm.py");
+        let d = format!(r#"
+#inc("compiler/lex.sra","L")
+#inc("compiler/parse.sra","P")
+#inc("compiler/emit_py.sra","Y")
+py=Y.py_emit(P.parse(L.lex(">@\"hi\"")))
+#wr("{out}",py)
+^#sh("python3 {out}")
+"#, out = out_py.display());
+        let o = ev(&d).to_str();
+        std::fs::remove_file(&out_py).ok();
+        assert!(o.contains("stub:claude-haiku-4-5") && o.contains("hi"), "py @ stub: {}", o);
     }
 
     #[test]
