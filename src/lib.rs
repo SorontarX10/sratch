@@ -104,6 +104,52 @@ mod tests {
     }
 
     #[test]
+    fn py2sra_compresses_agent_python() {
+        // tools/py2sra.py transpiles a real-world agent Python file to
+        // Sratch. We assert: (1) output parses cleanly under the native
+        // interpreter, (2) the compression ratio is meaningful (Sratch
+        // should be at most half the tokens of the Python source).
+        if !std::path::Path::new("tools/py2sra.py").exists() { return; }
+        if std::process::Command::new("python3").arg("--version").output().is_err() { return; }
+        let py = r#"from anthropic import Anthropic
+import urllib.request, subprocess
+c = Anthropic()
+
+def summarize(t):
+  return c.messages.create(model='claude-haiku-4-5',max_tokens=1024,messages=[{'role':'user','content':'sum: '+t}]).content[0].text
+
+page = urllib.request.urlopen('https://example.com').read().decode()
+s = summarize(page)
+print(s)
+out = subprocess.run(['bash','-c','echo ok'],capture_output=True,text=True).stdout
+print(out)
+"#;
+        let py_file = std::env::temp_dir().join("sratch_p2s_in.py");
+        std::fs::write(&py_file, py).unwrap();
+        let out = std::process::Command::new("python3")
+            .arg("tools/py2sra.py").arg(&py_file)
+            .output().unwrap();
+        let sra = String::from_utf8_lossy(&out.stdout).into_owned();
+        std::fs::remove_file(&py_file).ok();
+
+        // (1) transpiled output parses
+        let toks = lexer::Lexer::new(&sra).tokens().expect("lex transpiled");
+        let _prog = parser::Parser::new(toks).program().expect("parse transpiled");
+
+        // (2) at least 2x compression on token count
+        let py_tk = builtins::approx_tokens(py);
+        let sra_tk = builtins::approx_tokens(&sra);
+        assert!(sra_tk * 2 <= py_tk,
+                "expected >=2x token reduction; got py={} sra={}\n--- sratch ---\n{}",
+                py_tk, sra_tk, sra);
+
+        // (3) recognizable compressed primitives present
+        assert!(sra.contains("@"), "expected @ for LLM call: {sra}");
+        assert!(sra.contains("#get"), "expected #get for urlopen: {sra}");
+        assert!(sra.contains("#sh"), "expected #sh for subprocess: {sra}");
+    }
+
+    #[test]
     fn syntax_highlighter_spans() {
         if !std::path::Path::new("compiler/highlight.sra").exists() { return; }
         let d = r#"
